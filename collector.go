@@ -60,9 +60,6 @@ type Collector struct {
 	requestCount  uint32
 	responseCount uint32
 
-	// pauseBeforeQuit pauses crawler before quit bot, used when you want to check what happens
-	pauseBeforeQuit bool
-
 	wg   sizedwaitgroup.SizedWaitGroup
 	lock *sync.RWMutex
 }
@@ -133,15 +130,6 @@ func UserAgent(ua string) CollectorOption {
 func Headless(b bool) CollectorOption {
 	return func(c *Collector) {
 		c.headless = b
-	}
-}
-
-// PauseBeforeQuit will sleep an hour before quit, so we can check out what happends
-//
-//	@return CollectorOption
-func PauseBeforeQuit(b bool) CollectorOption {
-	return func(c *Collector) {
-		c.pauseBeforeQuit = b
 	}
 }
 

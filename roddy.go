@@ -2,7 +2,6 @@ package roddy
 
 import (
 	"context"
-	"fmt"
 	"hash/fnv"
 	"io"
 	"net/url"
@@ -15,20 +14,18 @@ import (
 	"github.com/coghost/xbot"
 	"github.com/coghost/xlog"
 	"github.com/coghost/xpretty"
+	"github.com/coghost/xutil"
 	"github.com/remeh/sizedwaitgroup"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
 
 const (
-	_cap = 4
+	_capacity = 4
 )
 
 func (c *Collector) Init() {
-	// TODO: remove this
-	xlog.InitLog(xlog.WithLevel(zerolog.InfoLevel), xlog.WithNoColor(false))
-	xpretty.Initialize(xpretty.WithNoColor(false))
-
+	c.initDefaultPrettyMode()
 	c.userAgent = xbot.UA
 	c.headless = false
 
@@ -41,13 +38,9 @@ func (c *Collector) Init() {
 }
 
 func (c *Collector) InitDefaultBot() {
-	if c.pauseBeforeQuit {
-		c.headless = false
-	}
-
 	bof := []xbot.BotOptFunc{
 		xbot.BotSpawn(false),
-		xbot.BotScreen(-2560),
+		xbot.BotScreen(0),
 		xbot.BotHeadless(c.headless),
 		xbot.BotUserAgent(c.userAgent),
 	}
@@ -55,14 +48,22 @@ func (c *Collector) InitDefaultBot() {
 	c.Bot = xbot.NewBot(bof...)
 }
 
-func (c *Collector) Visit(URL string) error {
-	defer func() {
-		if c.pauseBeforeQuit {
-			fmt.Println("sleep an hour, press Ctrl+C to quit.")
-			time.Sleep(time.Hour)
-		}
-	}()
+// HangUp will sleep an hour before quit, so we can check out what happends
+func (c *Collector) HangUp() {
+	xutil.Pause("")
+}
 
+// HangUpBySleep sleeps an hour, used when running test
+func (c *Collector) HangUpBySleep() {
+	time.Sleep(time.Hour)
+}
+
+func (c *Collector) initDefaultPrettyMode() {
+	xlog.InitLog(xlog.WithLevel(zerolog.InfoLevel), xlog.WithNoColor(false))
+	xpretty.Initialize(xpretty.WithNoColor(false))
+}
+
+func (c *Collector) Visit(URL string) error {
 	if c.Bot.Brw == nil {
 		log.Debug().Msg("no bot existed, create bot resources...")
 		xbot.Spawn(c.Bot)
@@ -107,7 +108,11 @@ func (c *Collector) fetch(URL *url.URL, depth int, ctx *Context) error {
 
 	log.Debug().Str("url", URL.String()).Msg("fetching")
 
-	c.Bot.GetPage(URL.String())
+	err := c.Bot.GetPageE(URL.String())
+	if err != nil {
+		c.handleOnError(nil, err, request, ctx)
+		return err
+	}
 
 	response := &Response{
 		Page:    c.Bot.Pg,
@@ -117,7 +122,7 @@ func (c *Collector) fetch(URL *url.URL, depth int, ctx *Context) error {
 
 	c.handleOnResponse(response)
 
-	err := c.handleOnHTML(response)
+	err = c.handleOnHTML(response)
 	if err != nil {
 		c.handleOnError(response, err, request, ctx)
 	}
@@ -222,7 +227,7 @@ func (c *Collector) OnRequest(f RequestCallback) {
 	defer c.lock.Unlock()
 
 	if c.requestCallbacks == nil {
-		c.requestCallbacks = make([]RequestCallback, 0, _cap)
+		c.requestCallbacks = make([]RequestCallback, 0, _capacity)
 	}
 
 	c.requestCallbacks = append(c.requestCallbacks, f)
@@ -233,7 +238,7 @@ func (c *Collector) OnHTML(selector string, f HTMLCallback) {
 	defer c.lock.Unlock()
 
 	if c.htmlCallbacks == nil {
-		c.htmlCallbacks = make([]*htmlCallbackContainer, 0, _cap)
+		c.htmlCallbacks = make([]*htmlCallbackContainer, 0, _capacity)
 	}
 
 	c.htmlCallbacks = append(c.htmlCallbacks, &htmlCallbackContainer{
@@ -248,7 +253,7 @@ func (c *Collector) OnResponse(f ResponseCallback) {
 	defer c.lock.Unlock()
 
 	if c.responseCallbacks == nil {
-		c.responseCallbacks = make([]ResponseCallback, 0, _cap)
+		c.responseCallbacks = make([]ResponseCallback, 0, _capacity)
 	}
 
 	c.responseCallbacks = append(c.responseCallbacks, f)
@@ -261,7 +266,7 @@ func (c *Collector) OnError(f ErrorCallback) {
 	defer c.lock.Unlock()
 
 	if c.errorCallbacks == nil {
-		c.errorCallbacks = make([]ErrorCallback, 0, _cap)
+		c.errorCallbacks = make([]ErrorCallback, 0, _capacity)
 	}
 
 	c.errorCallbacks = append(c.errorCallbacks, f)

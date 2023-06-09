@@ -56,9 +56,6 @@ var newCollectorTests = map[string]func(*RoddySuite){
 			c := NewCollector(Headless(b))
 			s.Equal(b, c.headless)
 		}
-
-		c := NewCollector(Headless(true), PauseBeforeQuit(true))
-		s.False(c.headless, "when pause, disable headless.")
 	},
 	"AllowedDomains": func(s *RoddySuite) {
 		for _, domains := range [][]string{

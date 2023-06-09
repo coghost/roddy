@@ -6,7 +6,7 @@ import (
 )
 
 // HTMLCallback is a type alias for OnHTML callback functions
-type HTMLCallback func(elem *HTMLElement)
+type HTMLCallback func(e *HTMLElement)
 
 type htmlCallbackContainer struct {
 	Selector string
