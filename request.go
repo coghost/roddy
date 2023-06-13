@@ -17,6 +17,8 @@ type Request struct {
 	PreviousURL *url.URL
 	URL         *url.URL
 
+	collector *Collector
+
 	// Ctx is a context between a Request and a Response
 	Ctx *Context
 	// Depth is the number of the parents of the request
@@ -53,8 +55,12 @@ func (r *Request) String() string {
 		urlJumping = r.PreviousURL.String() + " => " + urlJumping
 	}
 
-	return fmt.Sprintf("(%d) %s",
+	return fmt.Sprintf("(depth: %d) %s",
 		r.Depth,
 		urlJumping,
 	)
+}
+
+func (r *Request) Visit(URL string) error {
+	return r.collector.scrape(r.AbsoluteURL(URL), r.Depth+1, r.Ctx)
 }

@@ -16,7 +16,7 @@ func main() {
 
 	c.OnHTML("a[href]", func(e *roddy.HTMLElement) {
 		link := e.Attr("href")
-		fmt.Printf("Link found: %q -> %s\n", e.Text(), link)
+		fmt.Printf("Link found: %q -> %s\n", e.Text, link)
 
 		c.Visit(e.Request.AbsoluteURL(link))
 	})

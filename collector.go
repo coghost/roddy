@@ -11,7 +11,6 @@ import (
 	"roddy/storage"
 
 	"github.com/coghost/xbot"
-	"github.com/remeh/sizedwaitgroup"
 )
 
 type Collector struct {
@@ -47,6 +46,9 @@ type Collector struct {
 	// Leave it blank to allow any URLs to be visited
 	urlFilters []*regexp.Regexp
 
+	// allowURLRevisit allows multiple downloads of the same URL
+	allowURLRevisit bool
+
 	// store is used to identify if URL is visited or not
 	store storage.Storage
 	// previousURL is the url before visiting current one
@@ -57,10 +59,11 @@ type Collector struct {
 	responseCallbacks []ResponseCallback
 	errorCallbacks    []ErrorCallback
 
+	ignoredErrors []error
+
 	requestCount  uint32
 	responseCount uint32
 
-	wg   sizedwaitgroup.SizedWaitGroup
 	lock *sync.RWMutex
 }
 
@@ -133,6 +136,12 @@ func Headless(b bool) CollectorOption {
 	}
 }
 
+func AllowURLRevisit(b bool) CollectorOption {
+	return func(c *Collector) {
+		c.allowURLRevisit = b
+	}
+}
+
 // MaxDepth limits the recursion depth of visited URLs.
 func MaxDepth(depth int) CollectorOption {
 	return func(c *Collector) {
@@ -175,5 +184,11 @@ func DisallowedURLFilters(filters ...*regexp.Regexp) CollectorOption {
 func URLFilters(filters ...*regexp.Regexp) CollectorOption {
 	return func(c *Collector) {
 		c.urlFilters = filters
+	}
+}
+
+func IgnoredErrors(errs ...error) CollectorOption {
+	return func(c *Collector) {
+		c.ignoredErrors = errs
 	}
 }

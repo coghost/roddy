@@ -1,6 +1,7 @@
 package roddy
 
 import (
+	"bytes"
 	"context"
 	"hash/fnv"
 	"io"
@@ -11,17 +12,19 @@ import (
 
 	"roddy/storage"
 
+	"github.com/PuerkitoBio/goquery"
 	"github.com/coghost/xbot"
 	"github.com/coghost/xlog"
 	"github.com/coghost/xpretty"
 	"github.com/coghost/xutil"
-	"github.com/remeh/sizedwaitgroup"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
 
 const (
 	_capacity = 4
+
+	_waitGroupSize = 4
 )
 
 func (c *Collector) Init() {
@@ -29,10 +32,12 @@ func (c *Collector) Init() {
 	c.userAgent = xbot.UA
 	c.headless = false
 
+	c.maxDepth = 0
+	c.maxRequests = 0
+
 	c.store = &storage.InMemoryStorage{}
 	c.store.Init()
 
-	c.wg = sizedwaitgroup.New(4)
 	c.lock = &sync.RWMutex{}
 	c.ctx = context.Background()
 }
@@ -53,13 +58,26 @@ func (c *Collector) HangUp() {
 	xutil.Pause("")
 }
 
-// HangUpBySleep sleeps an hour, used when running test
-func (c *Collector) HangUpBySleep() {
+func (c *Collector) GoBack() {
+	c.Bot.Pg.MustNavigateBack()
+}
+
+// HangUpInSeconds hangs up browser within 3(by default) seconds
+func (c *Collector) HangUpInSeconds(args ...int) {
+	n := xutil.FirstOrDefaultArgs(3, args...)
+	xpretty.YellowPrintf("quit in %d seconds ...\n", n)
+
+	time.Sleep(time.Second * time.Duration(n))
+}
+
+// HangUpHourly sleeps an hour, used when running test
+func (c *Collector) HangUpHourly() {
+	xpretty.YellowPrintf("quit in one hour ...\n")
 	time.Sleep(time.Hour)
 }
 
 func (c *Collector) initDefaultPrettyMode() {
-	xlog.InitLog(xlog.WithLevel(zerolog.InfoLevel), xlog.WithNoColor(false))
+	xlog.InitLog(xlog.WithLevel(zerolog.InfoLevel), xlog.WithNoColor(false), xlog.WithCaller(true))
 	xpretty.Initialize(xpretty.WithNoColor(false))
 }
 
@@ -96,6 +114,7 @@ func (c *Collector) fetch(URL *url.URL, depth int, ctx *Context) error {
 		Depth: depth,
 
 		PreviousURL: c.previousURL,
+		collector:   c,
 	}
 
 	c.previousURL = URL
@@ -135,7 +154,7 @@ func (c *Collector) requestCheck(parsedURL *url.URL, depth int) error {
 		return ErrMaxDepth
 	}
 
-	if c.maxRequests > 0 && c.maxRequests <= c.requestCount {
+	if c.maxRequests > 0 && c.requestCount >= c.maxRequests {
 		return ErrMaxRequests
 	}
 
@@ -173,6 +192,10 @@ func (c *Collector) checkFilters(parsedURL *url.URL, domain string) error {
 }
 
 func (c *Collector) checkVistedStatus(parsedURL *url.URL) error {
+	if c.allowURLRevisit {
+		return nil
+	}
+
 	u := parsedURL.String()
 	uHash := requestHash(u, nil)
 
@@ -308,12 +331,22 @@ func (c *Collector) handleOnHTML(resp *Response) error {
 		return nil
 	}
 
-	for cbIndex, cb := range c.htmlCallbacks {
-		elems := resp.Page.MustElements(cb.Selector)
-		for _, elem := range elems {
-			e := NewHTMLElement(resp, elem, cb.Selector, cbIndex)
-			cb.Function(e)
-		}
+	doc, err := goquery.NewDocumentFromReader(bytes.NewBuffer([]byte(resp.Page.MustHTML())))
+	if err != nil {
+		return err
+	}
+
+	for _, cc := range c.htmlCallbacks {
+		i := 0
+
+		doc.Find(cc.Selector).Each(func(_ int, s *goquery.Selection) {
+			for _, n := range s.Nodes {
+				e := NewHTMLElement(resp, s, n, i)
+				i++
+
+				cc.Function(e)
+			}
+		})
 	}
 
 	return nil
@@ -331,11 +364,19 @@ func (c *Collector) handleOnError(response *Response, err error, request *Reques
 		}
 	}
 
+	if response.Request == nil {
+		response.Request = request
+	}
+
+	if response.Ctx == nil {
+		response.Ctx = request.Ctx
+	}
+
 	for _, f := range c.errorCallbacks {
 		f(response, err)
 	}
 
-	return nil
+	return err
 }
 
 func isMatchingFilter(fs []*regexp.Regexp, d []byte) bool {

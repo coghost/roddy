@@ -146,7 +146,7 @@ func (s *RoddySuite) Test_20_OnHTML() {
 
 	c.OnHTML("title", func(e *HTMLElement) {
 		titleCallbackCalled = true
-		s.Equal("Test Page", e.Text(), "Title element text")
+		s.Equal("Test Page", e.Text, "Title element text")
 	})
 
 	c.OnHTML("p", func(e *HTMLElement) {
@@ -154,13 +154,25 @@ func (s *RoddySuite) Test_20_OnHTML() {
 		s.Equal("description", e.Attr("class"))
 	})
 
-	c.OnHTML("body", func(e *HTMLElement) {
-		s.Equal("description", *e.Elem.MustElement("p").MustAttribute("class"))
-		s.Equal(2, len(e.Elem.MustElements("p")))
-	})
-
 	c.Visit(s.ts.URL + "/html")
 
 	s.True(titleCallbackCalled, "call OnHTML callback")
 	s.Equal(2, pTagCallbackCount, "find all <p> tags")
+}
+
+func (s *RoddySuite) Test_30_Depth() {
+	maxDepth := 2
+
+	c1 := NewCollector(MaxDepth(maxDepth), AllowURLRevisit(true))
+	requestCount := 0
+	c1.OnResponse(func(r *Response) {
+		requestCount++
+		if requestCount >= 10 {
+			return
+		}
+		err := c1.Visit(s.ts.URL)
+		s.Nil(err)
+	})
+	c1.Visit(s.ts.URL)
+	s.LessOrEqual(10, requestCount, "max depth is not worked.")
 }

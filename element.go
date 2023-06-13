@@ -1,8 +1,8 @@
 package roddy
 
 import (
-	"github.com/go-rod/rod"
-	"github.com/rs/zerolog/log"
+	"github.com/PuerkitoBio/goquery"
+	"golang.org/x/net/html"
 )
 
 // HTMLCallback is a type alias for OnHTML callback functions
@@ -16,7 +16,12 @@ type htmlCallbackContainer struct {
 type HTMLElement struct {
 	Selector string
 
-	Elem *rod.Element
+	Name string
+	Text string
+
+	attributes []html.Attribute
+
+	DOM *goquery.Selection
 
 	Request  *Request
 	Response *Response
@@ -24,30 +29,24 @@ type HTMLElement struct {
 	Index int
 }
 
-func NewHTMLElement(resp *Response, elem *rod.Element, name string, index int) *HTMLElement {
+func NewHTMLElement(resp *Response, s *goquery.Selection, n *html.Node, index int) *HTMLElement {
 	return &HTMLElement{
-		Selector: name,
-		Elem:     elem,
+		Name:     n.Data,
+		Text:     goquery.NewDocumentFromNode(n).Text(),
+		DOM:      s,
 		Request:  resp.Request,
 		Response: resp,
 		Index:    index,
+
+		attributes: n.Attr,
 	}
 }
 
 func (e *HTMLElement) Attr(k string) string {
-	v, err := e.Elem.Attribute(k)
-	if err != nil {
-		log.Error().Err(err).Str("attr", k).Msg("cannot get attr")
-		return ""
+	for _, a := range e.attributes {
+		if a.Key == k {
+			return a.Val
+		}
 	}
-	return *v
-}
-
-func (e *HTMLElement) Text() string {
-	v, err := e.Elem.Text()
-	if err != nil {
-		log.Error().Err(err).Str("selector", e.Selector).Msg("cannot get text")
-		return ""
-	}
-	return v
+	return ""
 }
