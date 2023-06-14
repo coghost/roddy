@@ -139,19 +139,23 @@ func (s *RoddySuite) Test_13_VisitDisallowedDomains() {
 
 func (s *RoddySuite) Test_20_OnHTML() {
 	c := NewCollector()
-	c.InitDefaultBot()
 
 	titleCallbackCalled := false
 	pTagCallbackCount := 0
 
 	c.OnHTML("title", func(e *HTMLElement) {
 		titleCallbackCalled = true
-		s.Equal("Test Page", e.Text, "Title element text")
+		s.Equal("Test Page", e.Text(), "Title element text")
 	})
 
 	c.OnHTML("p", func(e *HTMLElement) {
 		pTagCallbackCount++
 		s.Equal("description", e.Attr("class"))
+	})
+
+	c.OnHTML("body", func(e *HTMLElement) {
+		s.Equal("description", *e.Elem.MustElement("p").MustAttribute("class"))
+		s.Equal(2, len(e.Elem.MustElements("p")))
 	})
 
 	c.Visit(s.ts.URL + "/html")

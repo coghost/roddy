@@ -12,12 +12,10 @@ import (
 type RequestCallback func(*Request)
 
 type Request struct {
-	baseURL *url.URL
+	// ID is the Unique identifier of the request
+	ID uint32
 
-	PreviousURL *url.URL
-	URL         *url.URL
-
-	collector *Collector
+	URL *url.URL
 
 	// Ctx is a context between a Request and a Response
 	Ctx *Context
@@ -25,6 +23,9 @@ type Request struct {
 	Depth int
 
 	abort bool
+
+	baseURL   *url.URL
+	collector *Collector
 }
 
 var urlParser = whatwgUrl.NewParser(whatwgUrl.WithPercentEncodeSinglePercentSign())
@@ -50,15 +51,7 @@ func (r *Request) AbsoluteURL(u string) string {
 }
 
 func (r *Request) String() string {
-	urlJumping := r.URL.String()
-	if r.PreviousURL != nil {
-		urlJumping = r.PreviousURL.String() + " => " + urlJumping
-	}
-
-	return fmt.Sprintf("(depth: %d) %s",
-		r.Depth,
-		urlJumping,
-	)
+	return fmt.Sprintf("[REQ-%d](%d): %s", r.ID, r.Depth, r.URL.String())
 }
 
 func (r *Request) Visit(URL string) error {

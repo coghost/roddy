@@ -1,23 +1,22 @@
 package roddy
 
 import (
-	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"hash/fnv"
 	"io"
 	"net/url"
 	"regexp"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"roddy/storage"
 
-	"github.com/PuerkitoBio/goquery"
 	"github.com/coghost/xbot"
-	"github.com/coghost/xlog"
 	"github.com/coghost/xpretty"
 	"github.com/coghost/xutil"
-	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
 
@@ -27,8 +26,10 @@ const (
 	_waitGroupSize = 4
 )
 
+var collectorCounter uint32
+
 func (c *Collector) Init() {
-	c.initDefaultPrettyMode()
+	c.ID = atomic.AddUint32(&collectorCounter, 1)
 	c.userAgent = xbot.UA
 	c.headless = false
 
@@ -58,8 +59,17 @@ func (c *Collector) HangUp() {
 	xutil.Pause("")
 }
 
-func (c *Collector) GoBack() {
-	c.Bot.Pg.MustNavigateBack()
+func (c *Collector) MustGoBack() {
+	if c.maxDepth == 0 {
+		return
+	}
+
+	err := c.Bot.Pg.NavigateBack()
+	if err != nil {
+		xutil.PanicIfErr(err)
+	}
+
+	c.Bot.Pg.MustWaitLoad()
 }
 
 // HangUpInSeconds hangs up browser within 3(by default) seconds
@@ -76,14 +86,9 @@ func (c *Collector) HangUpHourly() {
 	time.Sleep(time.Hour)
 }
 
-func (c *Collector) initDefaultPrettyMode() {
-	xlog.InitLog(xlog.WithLevel(zerolog.InfoLevel), xlog.WithNoColor(false), xlog.WithCaller(true))
-	xpretty.Initialize(xpretty.WithNoColor(false))
-}
-
 func (c *Collector) Visit(URL string) error {
 	if c.Bot.Brw == nil {
-		log.Debug().Msg("no bot existed, create bot resources...")
+		log.Trace().Msg("no bot found, create bot")
 		xbot.Spawn(c.Bot)
 	}
 
@@ -97,10 +102,26 @@ func (c *Collector) scrape(u string, depth int, ctx *Context) error {
 	}
 
 	if err := c.requestCheck(parsedURL, depth); err != nil {
+		err = c.preHandleError(err)
 		return err
 	}
 
 	return c.fetch(parsedURL, depth, ctx)
+}
+
+func (c *Collector) preHandleError(err error) error {
+	for _, ie := range c.ignoredErrors {
+		if errors.Is(err, ie) {
+			return nil
+		}
+	}
+
+	var ave *AlreadyVisitedError
+	if c.ignoreVistedError && errors.As(err, &ave) {
+		return nil
+	}
+
+	return err
 }
 
 func (c *Collector) fetch(URL *url.URL, depth int, ctx *Context) error {
@@ -109,12 +130,12 @@ func (c *Collector) fetch(URL *url.URL, depth int, ctx *Context) error {
 	}
 
 	request := &Request{
+		ID:    atomic.AddUint32(&c.requestCount, 1),
 		URL:   URL,
 		Ctx:   ctx,
 		Depth: depth,
 
-		PreviousURL: c.previousURL,
-		collector:   c,
+		collector: c,
 	}
 
 	c.previousURL = URL
@@ -125,7 +146,7 @@ func (c *Collector) fetch(URL *url.URL, depth int, ctx *Context) error {
 		return nil
 	}
 
-	log.Debug().Str("url", URL.String()).Msg("fetching")
+	log.Debug().Str("url", request.String()).Msg("init request")
 
 	err := c.Bot.GetPageE(URL.String())
 	if err != nil {
@@ -139,6 +160,7 @@ func (c *Collector) fetch(URL *url.URL, depth int, ctx *Context) error {
 		Ctx:     ctx,
 	}
 
+	c.responseCount++
 	c.handleOnResponse(response)
 
 	err = c.handleOnHTML(response)
@@ -331,22 +353,33 @@ func (c *Collector) handleOnHTML(resp *Response) error {
 		return nil
 	}
 
-	doc, err := goquery.NewDocumentFromReader(bytes.NewBuffer([]byte(resp.Page.MustHTML())))
-	if err != nil {
-		return err
-	}
+	for cbIndex, cb := range c.htmlCallbacks {
+		// after current page's elements are handled, go back
+		defer c.MustGoBack()
 
-	for _, cc := range c.htmlCallbacks {
-		i := 0
+		pg := resp.Page
+		count := len(pg.MustElements(cb.Selector))
 
-		doc.Find(cc.Selector).Each(func(_ int, s *goquery.Selection) {
-			for _, n := range s.Nodes {
-				e := NewHTMLElement(resp, s, n, i)
-				i++
+		// this will skip page with depth of maxDepth
+		if c.skipOnHTMLOfMaxDepth && resp.Request.Depth >= c.maxDepth {
+			log.Debug().Msgf("skipped handle data (cb-%d): %s", cbIndex, resp.Request.String())
+			continue
+		}
 
-				cc.Function(e)
+		for i := 0; i < count; i++ {
+			// WARN: elems are not accessable after page is changed, we have to re-get all elements, then get correct elem by index.
+			elems, err := pg.Elements(cb.Selector)
+			if err != nil || len(elems) == 0 {
+				c.MustGoBack()
+				continue
 			}
-		})
+
+			e := NewHTMLElement(resp, elems[i], cb.Selector, cbIndex)
+
+			msg := fmt.Sprintf("[CID-%d]:(%d/%d) %d-%d", c.ID, i, len(elems), resp.Request.ID, resp.Request.Depth)
+			log.Trace().Msg(msg)
+			cb.Function(e)
+		}
 	}
 
 	return nil
@@ -408,6 +441,7 @@ func normalizeURL(u string) string {
 	if err != nil {
 		return u
 	}
+
 	return parsed.String()
 }
 

@@ -16,6 +16,8 @@ import (
 type Collector struct {
 	// Bot can be called out of collector
 	Bot *xbot.Bot
+	// ID is the unique identifier of a collector
+	ID uint32
 
 	// userAgent is the User-Agent string used by Bot
 	userAgent string
@@ -31,6 +33,9 @@ type Collector struct {
 	// maxRequests limit the number of requests done by the instance.
 	// Set it to 0 for infinite requests (default).
 	maxRequests uint32
+
+	// skipOnHTMLOfMaxDepth
+	skipOnHTMLOfMaxDepth bool
 
 	// allowedDomains is a domain whitelist.
 	// Leave it blank to allow any domains to be visited
@@ -51,6 +56,7 @@ type Collector struct {
 
 	// store is used to identify if URL is visited or not
 	store storage.Storage
+
 	// previousURL is the url before visiting current one
 	previousURL *url.URL
 
@@ -59,7 +65,8 @@ type Collector struct {
 	responseCallbacks []ResponseCallback
 	errorCallbacks    []ErrorCallback
 
-	ignoredErrors []error
+	ignoredErrors     []error
+	ignoreVistedError bool
 
 	requestCount  uint32
 	responseCount uint32
@@ -142,6 +149,12 @@ func AllowURLRevisit(b bool) CollectorOption {
 	}
 }
 
+func SkipOnHTMLOfMaxDepth(b bool) CollectorOption {
+	return func(c *Collector) {
+		c.skipOnHTMLOfMaxDepth = b
+	}
+}
+
 // MaxDepth limits the recursion depth of visited URLs.
 func MaxDepth(depth int) CollectorOption {
 	return func(c *Collector) {
@@ -190,5 +203,11 @@ func URLFilters(filters ...*regexp.Regexp) CollectorOption {
 func IgnoredErrors(errs ...error) CollectorOption {
 	return func(c *Collector) {
 		c.ignoredErrors = errs
+	}
+}
+
+func IgnoreVistedError(b bool) CollectorOption {
+	return func(c *Collector) {
+		c.ignoreVistedError = b
 	}
 }
