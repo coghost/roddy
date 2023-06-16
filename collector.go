@@ -24,6 +24,7 @@ type Collector struct {
 	// headless is whether using headless mode or not,
 	// it will be force set to false, when pauseBeforeQuit is set to true.
 	headless bool
+	proxies  []string
 
 	ctx context.Context
 
@@ -238,5 +239,13 @@ func HighlightCount(i int) CollectorOption {
 func HighlightStyle(style string) CollectorOption {
 	return func(c *Collector) {
 		c.highlightStyle = style
+	}
+}
+
+func WithProxies(proxies ...string) CollectorOption {
+	return func(c *Collector) {
+		for _, p := range proxies {
+			c.proxies = append(c.proxies, p)
+		}
 	}
 }

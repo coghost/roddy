@@ -17,6 +17,7 @@ import (
 	"github.com/coghost/xbot"
 	"github.com/coghost/xpretty"
 	"github.com/coghost/xutil"
+	"github.com/gookit/goutil/arrutil"
 	"github.com/rs/zerolog/log"
 )
 
@@ -47,11 +48,18 @@ func (c *Collector) Init() {
 }
 
 func (c *Collector) InitDefaultBot() {
+	proxy := ""
+
+	if len(c.proxies) != 0 {
+		proxy = arrutil.RandomOne(c.proxies)
+	}
+
 	bof := []xbot.BotOptFunc{
 		xbot.BotSpawn(false),
 		xbot.BotScreen(0),
 		xbot.BotHeadless(c.headless),
 		xbot.BotUserAgent(c.userAgent),
+		xbot.BotProxyServer(proxy),
 	}
 
 	c.Bot = xbot.NewBot(bof...)

@@ -8,7 +8,7 @@ import (
 	"github.com/coghost/xlog"
 )
 
-func main() {
+func login2scrape() {
 	c := roddy.NewCollector()
 	defer c.HangUpInSeconds()
 	xlog.InitLogForConsole()
@@ -25,4 +25,28 @@ func main() {
 	})
 
 	c.Visit("https://login3.scrape.center/login")
+}
+
+func login2spiderbuf() {
+	c := roddy.NewCollector()
+	defer c.HangUpInSeconds()
+
+	xlog.InitLogForConsole(xlog.WithLevel(1))
+
+	c.OnSerp("form.form-horizontal", func(e *roddy.SerpElement) {
+		e.UpdateText(`input#username`, "admin")
+		e.UpdateText(`input#password`, "123456")
+		e.Click(`button.btn`)
+	})
+
+	c.OnHTML("table.table>tbody>tr", func(e *roddy.HTMLElement) {
+		fmt.Println(e.Text())
+	})
+
+	c.Visit("http://www.spiderbuf.cn/e01/")
+}
+
+func main() {
+	login2scrape()
+	login2spiderbuf()
 }
