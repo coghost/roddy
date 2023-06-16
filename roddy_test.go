@@ -154,8 +154,8 @@ func (s *RoddySuite) Test_20_OnHTML() {
 	})
 
 	c.OnHTML("body", func(e *HTMLElement) {
-		s.Equal("description", *e.Elem.MustElement("p").MustAttribute("class"))
-		s.Equal(2, len(e.Elem.MustElements("p")))
+		s.Equal("description", *e.DOM.MustElement("p").MustAttribute("class"))
+		s.Equal(2, len(e.DOM.MustElements("p")))
 	})
 
 	c.Visit(s.ts.URL + "/html")

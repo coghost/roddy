@@ -60,16 +60,24 @@ type Collector struct {
 	// previousURL is the url before visiting current one
 	previousURL *url.URL
 
+	serpCallbacks     []*serpCallbackContainer
 	htmlCallbacks     []*htmlCallbackContainer
 	requestCallbacks  []RequestCallback
 	responseCallbacks []ResponseCallback
 	errorCallbacks    []ErrorCallback
+	scrapedCallbacks  []ScrapedCallback
 
 	ignoredErrors     []error
 	ignoreVistedError bool
 
 	requestCount  uint32
 	responseCount uint32
+
+	// highlightCount by default(0) is disabled.
+	highlightCount int
+	highlightStyle string
+
+	prevRequest *Request
 
 	lock *sync.RWMutex
 }
@@ -109,6 +117,9 @@ var (
 	ErrNoURLFiltersMatch = errors.New("No URLFilters match")
 	// ErrMaxRequests is the error returned when exceeding max requests
 	ErrMaxRequests = errors.New("Max Requests limit reached")
+
+	// ErrNoElemFound is the error for no element is found for given selector
+	ErrNoElemFound = errors.New("No element found")
 )
 
 func NewCollector(options ...CollectorOption) *Collector {
@@ -202,12 +213,30 @@ func URLFilters(filters ...*regexp.Regexp) CollectorOption {
 
 func IgnoredErrors(errs ...error) CollectorOption {
 	return func(c *Collector) {
-		c.ignoredErrors = errs
+		for _, err := range errs {
+			c.ignoredErrors = append(c.ignoredErrors, err)
+		}
 	}
 }
 
 func IgnoreVistedError(b bool) CollectorOption {
 	return func(c *Collector) {
 		c.ignoreVistedError = b
+	}
+}
+
+func HighlightCount(i int) CollectorOption {
+	return func(c *Collector) {
+		c.highlightCount = i
+	}
+}
+
+// HighlightStyle highlight element with given style.
+//   - style: the style given should be in one line.
+//
+// @return CollectorOption
+func HighlightStyle(style string) CollectorOption {
+	return func(c *Collector) {
+		c.highlightStyle = style
 	}
 }

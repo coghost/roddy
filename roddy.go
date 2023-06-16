@@ -39,6 +39,9 @@ func (c *Collector) Init() {
 	c.store = &storage.InMemoryStorage{}
 	c.store.Init()
 
+	c.highlightCount = 2
+	c.highlightStyle = `box-shadow: 0 0 10px rgba(255,125,0,1), 0 0 20px 5px rgba(255,175,0,0.8), 0 0 30px 15px rgba(255,225,0,0.5);`
+
 	c.lock = &sync.RWMutex{}
 	c.ctx = context.Background()
 }
@@ -66,7 +69,7 @@ func (c *Collector) MustGoBack() {
 
 	err := c.Bot.Pg.NavigateBack()
 	if err != nil {
-		xutil.PanicIfErr(err)
+		log.Fatal().Err(err).Msg("cannot go back")
 	}
 
 	c.Bot.Pg.MustWaitLoad()
@@ -102,16 +105,16 @@ func (c *Collector) scrape(u string, depth int, ctx *Context) error {
 	}
 
 	if err := c.requestCheck(parsedURL, depth); err != nil {
-		err = c.preHandleError(err)
+		err = c.checkIgnoredError(err)
 		return err
 	}
 
 	return c.fetch(parsedURL, depth, ctx)
 }
 
-func (c *Collector) preHandleError(err error) error {
+func (c *Collector) checkIgnoredError(err error) error {
 	for _, ie := range c.ignoredErrors {
-		if errors.Is(err, ie) {
+		if err == ie || errors.Unwrap(err) == ie {
 			return nil
 		}
 	}
@@ -129,8 +132,9 @@ func (c *Collector) fetch(URL *url.URL, depth int, ctx *Context) error {
 		ctx = NewContext()
 	}
 
+	rid := atomic.AddUint32(&c.requestCount, 1)
 	request := &Request{
-		ID:    atomic.AddUint32(&c.requestCount, 1),
+		ID:    rid,
 		URL:   URL,
 		Ctx:   ctx,
 		Depth: depth,
@@ -146,7 +150,7 @@ func (c *Collector) fetch(URL *url.URL, depth int, ctx *Context) error {
 		return nil
 	}
 
-	log.Debug().Str("url", request.String()).Msg("init request")
+	log.Debug().Str("request", request.String()).Msg("visiting")
 
 	err := c.Bot.GetPageE(URL.String())
 	if err != nil {
@@ -163,10 +167,19 @@ func (c *Collector) fetch(URL *url.URL, depth int, ctx *Context) error {
 	c.responseCount++
 	c.handleOnResponse(response)
 
+	err = c.handleOnSerp(response)
+	if err != nil {
+		err = c.handleOnError(response, err, request, ctx)
+		return err
+	}
+
 	err = c.handleOnHTML(response)
 	if err != nil {
-		c.handleOnError(response, err, request, ctx)
+		err = c.handleOnError(response, err, request, ctx)
+		return err
 	}
+
+	c.handleOnScraped(response)
 
 	return err
 }
@@ -260,10 +273,11 @@ func (c *Collector) isDomainAllowed(domain string) bool {
 
 /**
 - OnRequest
-OnError
-OnResponse
+- OnResponse
+- OnSerp
 - OnHTML
-OnScraped
+- OnScraped
+- OnError
 **/
 
 // OnRequest
@@ -278,17 +292,35 @@ func (c *Collector) OnRequest(f RequestCallback) {
 	c.requestCallbacks = append(c.requestCallbacks, f)
 }
 
-func (c *Collector) OnHTML(selector string, f HTMLCallback) {
+func (c *Collector) OnSerp(selector string, f SerpCallback) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
+
+	if c.serpCallbacks == nil {
+		c.serpCallbacks = make([]*serpCallbackContainer, 0, _capacity)
+	}
+
+	c.serpCallbacks = append(c.serpCallbacks, &serpCallbackContainer{
+		Selector: selector,
+		Function: f,
+	})
+}
+
+func (c *Collector) OnHTML(selector string, f HTMLCallback, opts ...OnHTMLOptionFunc) {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+
+	opt := OnHTMLOptions{deferFunc: func() {}}
+	bindOnHTMLOptions(&opt, opts...)
 
 	if c.htmlCallbacks == nil {
 		c.htmlCallbacks = make([]*htmlCallbackContainer, 0, _capacity)
 	}
 
 	c.htmlCallbacks = append(c.htmlCallbacks, &htmlCallbackContainer{
-		Selector: selector,
-		Function: f,
+		Selector:  selector,
+		Function:  f,
+		DeferFunc: opt.deferFunc,
 	})
 }
 
@@ -336,6 +368,19 @@ func (c *Collector) OnHTMLDetach(goquerySelector string) {
 	}
 }
 
+// OnScraped registers a function. Function will be executed after
+// OnHTML, as a final part of the scraping.
+func (c *Collector) OnScraped(f ScrapedCallback) {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+
+	if c.scrapedCallbacks == nil {
+		c.scrapedCallbacks = make([]ScrapedCallback, 0, 4)
+	}
+
+	c.scrapedCallbacks = append(c.scrapedCallbacks, f)
+}
+
 func (c *Collector) handleOnRequest(r *Request) {
 	for _, f := range c.requestCallbacks {
 		f(r)
@@ -348,21 +393,61 @@ func (c *Collector) handleOnResponse(r *Response) {
 	}
 }
 
+func (c *Collector) handleOnSerp(resp *Response) error {
+	if len(c.serpCallbacks) == 0 {
+		return nil
+	}
+
+	for cbIndex, cb := range c.serpCallbacks {
+		pg := resp.Page
+
+		elem, err := pg.Element(cb.Selector)
+		if err != nil {
+			continue
+		}
+
+		c.Bot.BindRoot(elem)
+		defer c.Bot.ResetRoot()
+
+		e := NewSerpElement(resp, elem, cb.Selector, cbIndex)
+		cb.Function(e)
+	}
+
+	return nil
+}
+
 func (c *Collector) handleOnHTML(resp *Response) error {
 	if len(c.htmlCallbacks) == 0 {
 		return nil
 	}
 
+	finalDepth := resp.Request.Depth >= c.maxDepth
+	request := resp.Request
+
 	for cbIndex, cb := range c.htmlCallbacks {
 		// after current page's elements are handled, go back
-		defer c.MustGoBack()
+		if cb.DeferFunc != nil {
+			defer cb.DeferFunc()
+		}
 
 		pg := resp.Page
-		count := len(pg.MustElements(cb.Selector))
+		// count := len(pg.MustElements(cb.Selector))
+
+		elems, err := pg.Elements(cb.Selector)
+		if err != nil {
+			return err
+		}
+
+		count := len(elems)
+		if count == 0 {
+			return fmt.Errorf("%s: %w", request.String(), ErrNoElemFound)
+		}
 
 		// this will skip page with depth of maxDepth
-		if c.skipOnHTMLOfMaxDepth && resp.Request.Depth >= c.maxDepth {
-			log.Debug().Msgf("skipped handle data (cb-%d): %s", cbIndex, resp.Request.String())
+		if c.skipOnHTMLOfMaxDepth && finalDepth {
+			msg := fmt.Sprintf("[CID-%d]: %s", c.ID, request.String())
+			log.Debug().Msgf("max depth reached, skip: %s", msg)
+
 			continue
 		}
 
@@ -376,8 +461,22 @@ func (c *Collector) handleOnHTML(resp *Response) error {
 
 			e := NewHTMLElement(resp, elems[i], cb.Selector, cbIndex)
 
-			msg := fmt.Sprintf("[CID-%d]:(%d/%d) %d-%d", c.ID, i, len(elems), resp.Request.ID, resp.Request.Depth)
-			log.Trace().Msg(msg)
+			parent := fmt.Sprintf("%s: I-%d/%d", request.IDString(), i, count)
+			target := fmt.Sprintf("#%d | %s[%d] | %s", request.Depth+1, cb.Selector, i, e.Target())
+
+			msg := "spawn"
+			if c.prevRequest != nil && c.prevRequest.ID > request.ID {
+				msg = "recall"
+			}
+
+			// each time when switch from one request to another, we log and highlight it.
+			if c.prevRequest == nil || c.prevRequest.ID != request.ID {
+				log.Debug().Str("with", target).Str("from", parent).Msg(msg)
+				e.Focus(c.highlightCount, c.highlightStyle)
+				c.prevRequest = request
+			}
+
+			log.Trace().Str("with", target).Str("from", parent).Msg(msg)
 			cb.Function(e)
 		}
 	}
@@ -386,6 +485,8 @@ func (c *Collector) handleOnHTML(resp *Response) error {
 }
 
 func (c *Collector) handleOnError(response *Response, err error, request *Request, ctx *Context) error {
+	err = c.checkIgnoredError(err)
+
 	if err == nil {
 		return nil
 	}
@@ -410,6 +511,12 @@ func (c *Collector) handleOnError(response *Response, err error, request *Reques
 	}
 
 	return err
+}
+
+func (c *Collector) handleOnScraped(r *Response) {
+	for _, f := range c.scrapedCallbacks {
+		f(r)
+	}
 }
 
 func isMatchingFilter(fs []*regexp.Regexp, d []byte) bool {
@@ -454,5 +561,6 @@ func requestHash(url string, body io.Reader) uint64 {
 	if body != nil {
 		io.Copy(h, body)
 	}
+
 	return h.Sum64()
 }

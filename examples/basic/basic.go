@@ -5,18 +5,20 @@ import (
 
 	"roddy"
 
+	"github.com/coghost/xlog"
 	"github.com/coghost/xpretty"
 )
 
 func main() {
 	c := roddy.NewCollector(
 		roddy.AllowedDomains("hackerspaces.org", "wiki.hackerspaces.org"),
-		roddy.Headless(false),
 	)
+
+	xlog.InitLogForConsole()
 
 	c.OnHTML("a[href]", func(e *roddy.HTMLElement) {
 		link := e.Attr("href")
-		fmt.Printf("Link found: %q -> %s\n", e.Text(), link)
+		fmt.Printf("from %s, found: %q -> %s\n", e.Request.String(), e.Text(), link)
 
 		c.Visit(e.Request.AbsoluteURL(link))
 	})

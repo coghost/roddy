@@ -50,8 +50,12 @@ func (r *Request) AbsoluteURL(u string) string {
 	return absURL.Href(false)
 }
 
+func (r *Request) IDString() string {
+	return fmt.Sprintf("C-%d#%d.R-%d", r.collector.ID, r.Depth, r.ID)
+}
+
 func (r *Request) String() string {
-	return fmt.Sprintf("[REQ-%d](%d): %s", r.ID, r.Depth, r.URL.String())
+	return fmt.Sprintf("%s | %s", r.IDString(), r.URL.String())
 }
 
 func (r *Request) Visit(URL string) error {

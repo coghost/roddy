@@ -1,0 +1,28 @@
+package main
+
+import (
+	"fmt"
+
+	"roddy"
+
+	"github.com/coghost/xlog"
+)
+
+func main() {
+	c := roddy.NewCollector()
+	defer c.HangUpInSeconds()
+	xlog.InitLogForConsole()
+
+	c.OnSerp("form.el-form", func(e *roddy.SerpElement) {
+		e.UpdateText(`input[type="text"]`, "Admin")
+		e.UpdateText(`input[type="password"]`, "123456")
+		e.Click(`button[type="button"]`)
+	})
+
+	c.OnHTML(`a[href="/"]`, func(e *roddy.HTMLElement) {
+		cls := e.Attr("class")
+		fmt.Printf("got class: %q\n", cls)
+	})
+
+	c.Visit("https://login3.scrape.center/login")
+}
