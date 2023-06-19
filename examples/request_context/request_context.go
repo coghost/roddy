@@ -7,8 +7,7 @@ import (
 )
 
 func main() {
-	c := roddy.NewCollector()
-	defer c.HangUpInSeconds()
+	c := roddy.NewCollector(roddy.QuitInSeconds())
 
 	c.OnRequest(func(r *roddy.Request) {
 		r.Ctx.Put("url", r.String())

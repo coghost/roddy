@@ -15,8 +15,9 @@ func main() {
 			regexp.MustCompile("http://httpbin\\.org/(|e.+)$"),
 			regexp.MustCompile("https://github\\.com/req.+"),
 		),
+		roddy.QuitInSeconds(),
 	)
-	defer c.HangUpInSeconds()
+
 	xlog.InitLogForConsole()
 
 	c.OnHTML("a[href]", func(e *roddy.HTMLElement) {

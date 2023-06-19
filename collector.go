@@ -11,6 +11,7 @@ import (
 	"roddy/storage"
 
 	"github.com/coghost/xbot"
+	"github.com/coghost/xutil"
 )
 
 type Collector struct {
@@ -79,6 +80,14 @@ type Collector struct {
 	highlightStyle string
 
 	prevRequest *Request
+
+	// quitInSeconds
+	//  - when < 0, hang up until enter pressed
+	//  - when > 0, hang up in seconds
+	quitInSeconds int
+
+	// clear will clear created bot resource
+	clear bool
 
 	lock *sync.RWMutex
 }
@@ -247,5 +256,22 @@ func WithProxies(proxies ...string) CollectorOption {
 		for _, p := range proxies {
 			c.proxies = append(c.proxies, p)
 		}
+	}
+}
+
+// QuitInSeconds by default is 3
+//
+//	@return CollectorOption
+func QuitInSeconds(args ...int) CollectorOption {
+	i := xutil.FirstOrDefaultArgs(3, args...)
+
+	return func(c *Collector) {
+		c.quitInSeconds = i
+	}
+}
+
+func Clear(b bool) CollectorOption {
+	return func(c *Collector) {
+		c.clear = b
 	}
 }

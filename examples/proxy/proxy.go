@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"math/rand"
+	"time"
 
 	"roddy"
 
@@ -17,9 +19,11 @@ func main() {
 			"58.246.58.150:9002",
 			"120.197.40.219:9002",
 		),
+		roddy.QuitInSeconds(),
 	)
 
-	defer c.HangUpInSeconds()
+	rand.New(rand.NewSource(time.Now().Unix()))
+
 	xlog.InitLogForConsole()
 
 	c.OnHTML("body", func(e *roddy.HTMLElement) {

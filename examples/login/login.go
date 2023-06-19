@@ -9,8 +9,8 @@ import (
 )
 
 func login2scrape() {
-	c := roddy.NewCollector()
-	defer c.HangUpInSeconds()
+	c := roddy.NewCollector(roddy.QuitInSeconds())
+
 	xlog.InitLogForConsole()
 
 	c.OnSerp("form.el-form", func(e *roddy.SerpElement) {
@@ -28,8 +28,7 @@ func login2scrape() {
 }
 
 func login2spiderbuf() {
-	c := roddy.NewCollector()
-	defer c.HangUpInSeconds()
+	c := roddy.NewCollector(roddy.QuitInSeconds())
 
 	xlog.InitLogForConsole(xlog.WithLevel(1))
 

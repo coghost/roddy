@@ -33,6 +33,7 @@ func (c *Collector) Init() {
 	c.ID = atomic.AddUint32(&collectorCounter, 1)
 	c.userAgent = xbot.UA
 	c.headless = false
+	c.clear = true
 
 	c.maxDepth = 0
 	c.maxRequests = 0
@@ -65,6 +66,21 @@ func (c *Collector) InitDefaultBot() {
 	c.Bot = xbot.NewBot(bof...)
 }
 
+func (c *Collector) Clear() {
+	if !c.clear {
+		return
+	}
+
+	if c.quitInSeconds < 0 {
+		c.HangUp()
+	} else if c.quitInSeconds > 0 {
+		c.blockInSeconds(c.quitInSeconds)
+	}
+
+	c.Bot.Brw.Close()
+	c.Bot = nil
+}
+
 // HangUp will sleep an hour before quit, so we can check out what happends
 func (c *Collector) HangUp() {
 	xutil.Pause("")
@@ -83,21 +99,22 @@ func (c *Collector) MustGoBack() {
 	c.Bot.Pg.MustWaitLoad()
 }
 
-// HangUpInSeconds hangs up browser within 3(by default) seconds
-func (c *Collector) HangUpInSeconds(args ...int) {
-	n := xutil.FirstOrDefaultArgs(3, args...)
-	xpretty.YellowPrintf("quit in %d seconds ...\n", n)
+// blockInSeconds blocks collector clear browser with 3(by default) seconds
+func (c *Collector) blockInSeconds(n int) {
+	xpretty.YellowPrintf(">>> quit in %d seconds ", n)
 
+	if n <= 60 {
+		TickWithDot(n)
+		return
+	}
+
+	fmt.Println()
 	time.Sleep(time.Second * time.Duration(n))
 }
 
-// HangUpHourly sleeps an hour, used when running test
-func (c *Collector) HangUpHourly() {
-	xpretty.YellowPrintf("quit in one hour ...\n")
-	time.Sleep(time.Hour)
-}
-
 func (c *Collector) Visit(URL string) error {
+	defer c.Clear()
+
 	if c.Bot.Brw == nil {
 		log.Trace().Msg("no bot found, create bot")
 		xbot.Spawn(c.Bot)
@@ -467,6 +484,11 @@ func (c *Collector) handleOnHTML(resp *Response) error {
 				continue
 			}
 
+			if i >= len(elems) {
+				// elems may changed while we re-get all elements.
+				continue
+			}
+
 			e := NewHTMLElement(resp, elems[i], cb.Selector, cbIndex)
 
 			parent := fmt.Sprintf("%s: I-%d/%d", request.IDString(), i, count)
@@ -571,4 +593,21 @@ func requestHash(url string, body io.Reader) uint64 {
 	}
 
 	return h.Sum64()
+}
+
+func TickWithDot(n int, args ...int) {
+	perLine := xutil.FirstOrDefaultArgs(10, args...)
+	if perLine <= 0 {
+		perLine = 1
+	}
+
+	for i := 0; i < n; i++ {
+		time.Sleep(time.Second * time.Duration(1))
+		xpretty.YellowPrintf(".")
+
+		if (i+1)%perLine == 0 {
+			fmt.Println()
+		}
+	}
+	fmt.Println()
 }
