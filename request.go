@@ -1,9 +1,11 @@
 package roddy
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"strings"
+	"sync/atomic"
 
 	whatwgUrl "github.com/nlnwa/whatwg-url/url"
 )
@@ -28,7 +30,28 @@ type Request struct {
 	collector *Collector
 }
 
+type serializableRequest struct {
+	ID    uint32
+	URL   string
+	Depth int
+	Ctx   map[string]interface{}
+}
+
 var urlParser = whatwgUrl.NewParser(whatwgUrl.WithPercentEncodeSinglePercentSign())
+
+func (r *Request) New(URL string) (*Request, error) {
+	u2, err := ParseUrl(URL)
+	if err != nil {
+		return nil, err
+	}
+
+	return &Request{
+		URL:       u2,
+		Ctx:       r.Ctx,
+		ID:        atomic.AddUint32(&r.collector.requestCount, 1),
+		collector: r.collector,
+	}, nil
+}
 
 func (r *Request) AbsoluteURL(u string) string {
 	if strings.HasPrefix(u, "#") {
@@ -60,4 +83,43 @@ func (r *Request) String() string {
 
 func (r *Request) Visit(URL string) error {
 	return r.collector.scrape(r.AbsoluteURL(URL), r.Depth+1, r.Ctx)
+}
+
+func (r *Request) Do() error {
+	return r.collector.scrape(r.URL.String(), r.Depth, r.Ctx)
+}
+
+// Marshal serializes the Request
+func (r *Request) Marshal() ([]byte, error) {
+	ctx := make(map[string]interface{})
+
+	if r.Ctx != nil {
+		r.Ctx.ForEach(func(k string, v interface{}) interface{} {
+			ctx[k] = v
+			return nil
+		})
+	}
+
+	req := &serializableRequest{
+		URL:   r.URL.String(),
+		Depth: r.Depth,
+		Ctx:   ctx,
+		ID:    r.ID,
+	}
+
+	return json.Marshal(req)
+}
+
+func ParseUrl(URL string) (*url.URL, error) {
+	u, err := urlParser.Parse(URL)
+	if err != nil {
+		return nil, err
+	}
+
+	u2, err := url.Parse(u.Href(false))
+	if err != nil {
+		return nil, err
+	}
+
+	return u2, err
 }

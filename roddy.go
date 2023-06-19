@@ -2,6 +2,7 @@ package roddy
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"hash/fnv"
@@ -115,15 +116,42 @@ func (c *Collector) blockInSeconds(n int) {
 func (c *Collector) Visit(URL string) error {
 	defer c.Clear()
 
-	if c.Bot.Brw == nil {
-		log.Trace().Msg("no bot found, create bot")
-		xbot.Spawn(c.Bot)
-	}
-
 	return c.scrape(URL, 1, nil)
 }
 
+func (c *Collector) UnmarshalRequest(r []byte) (*Request, error) {
+	req := &serializableRequest{}
+
+	err := json.Unmarshal(r, req)
+	if err != nil {
+		return nil, err
+	}
+
+	u, err := url.Parse(req.URL)
+	if err != nil {
+		return nil, err
+	}
+
+	ctx := NewContext()
+	for k, v := range req.Ctx {
+		ctx.Put(k, v)
+	}
+
+	return &Request{
+		URL:       u,
+		Depth:     req.Depth,
+		Ctx:       ctx,
+		ID:        atomic.AddUint32(&c.requestCount, 1),
+		collector: c,
+	}, nil
+}
+
 func (c *Collector) scrape(u string, depth int, ctx *Context) error {
+	if c.Bot.Brw == nil {
+		log.Debug().Msg("no bot found, create bot")
+		xbot.Spawn(c.Bot)
+	}
+
 	parsedURL, err := str2URL(u)
 	if err != nil {
 		return err

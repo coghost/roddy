@@ -130,6 +130,9 @@ var (
 
 	// ErrNoElemFound is the error for no element is found for given selector
 	ErrNoElemFound = errors.New("No element found")
+
+	// ErrQueueFull is the error returned when the queue is full
+	ErrQueueFull = errors.New("Queue MaxSize reached")
 )
 
 func NewCollector(options ...CollectorOption) *Collector {
