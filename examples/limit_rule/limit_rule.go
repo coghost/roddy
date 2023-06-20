@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"roddy"
@@ -25,7 +26,8 @@ func main() {
 	)
 
 	c.OnHTML("html>body", func(e *roddy.HTMLElement) {
-		fmt.Println("[from]", e.Request.IDString(), "[got]", e.Text()[:32])
+		txt := strings.Split(e.Text(), "\n")[0]
+		fmt.Println("[from]", e.Request.IDString(), "[got]", txt)
 	})
 
 	for i := 0; i < 10; i++ {

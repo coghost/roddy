@@ -20,7 +20,6 @@ import (
 	"github.com/coghost/xpretty"
 	"github.com/coghost/xutil"
 	"github.com/go-rod/rod"
-	"github.com/gookit/goutil/arrutil"
 	"github.com/rs/zerolog/log"
 )
 
@@ -217,64 +216,6 @@ func (c *Collector) fetch(URL *url.URL, depth int, ctx *Context) error {
 	c.handleOnScraped(response)
 
 	return err
-}
-
-func (c *Collector) initDefaultBot() {
-	c.initPagePool()
-
-	proxy := ""
-
-	if len(c.proxies) != 0 {
-		proxy = arrutil.RandomOne(c.proxies)
-	}
-
-	bof := []xbot.BotOptFunc{
-		xbot.BotSpawn(false),
-		xbot.BotScreen(0),
-		xbot.BotHeadless(c.headless),
-		xbot.BotUserAgent(c.userAgent),
-		xbot.BotProxyServer(proxy),
-	}
-
-	c.Bot = xbot.NewBot(bof...)
-}
-
-func (c *Collector) initPagePool() {
-	if !c.async {
-		return
-	}
-
-	// if async mode, force set Parallelism to 1, if is 0
-	c.parallelism = xutil.AorB(c.parallelism, 1)
-	c.pagePool = rod.NewPagePool(c.parallelism)
-}
-
-func (c *Collector) createBot() {
-	if c.Bot.Brw != nil {
-		return
-	}
-
-	log.Trace().Msg("no bot found, create bot")
-	xbot.Spawn(c.Bot)
-
-	// in async mode, after spawn browser and page, put page to pool
-	if c.async {
-		log.Trace().Msg("put default page to page pool")
-		pg := c.pagePool.Get(func() *rod.Page {
-			return c.Bot.Pg
-		})
-		c.pagePool.Put(pg)
-	}
-}
-
-func (c *Collector) createPage() *rod.Page {
-	if !c.async {
-		return c.Bot.Pg
-	}
-
-	return c.pagePool.Get(func() *rod.Page {
-		return xbot.CustomizePage(c.Bot.Brw, c.Bot.Config, xbot.Incognito(true))
-	})
 }
 
 func (c *Collector) requestCheck(parsedURL *url.URL, depth int) error {
