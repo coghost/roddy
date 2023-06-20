@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"github.com/go-rod/rod"
 	whatwgUrl "github.com/nlnwa/whatwg-url/url"
 )
 
@@ -28,6 +29,7 @@ type Request struct {
 
 	baseURL   *url.URL
 	collector *Collector
+	page      *rod.Page
 }
 
 type serializableRequest struct {
@@ -74,7 +76,12 @@ func (r *Request) AbsoluteURL(u string) string {
 }
 
 func (r *Request) IDString() string {
-	return fmt.Sprintf("C-%d#%d.R-%d", r.collector.ID, r.Depth, r.ID)
+	pg := ""
+	if r.page != nil {
+		pg = r.page.String()
+	}
+
+	return fmt.Sprintf("C-%d#%d%s.R-%d", r.collector.ID, r.Depth, pg, r.ID)
 }
 
 func (r *Request) String() string {

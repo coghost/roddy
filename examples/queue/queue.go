@@ -2,7 +2,9 @@ package main
 
 import (
 	"fmt"
+	"time"
 
+	"roddy/examples/echoserver"
 	"roddy/queue"
 
 	"roddy"
@@ -13,9 +15,19 @@ import (
 func main() {
 	xlog.InitLogForConsole()
 
-	url := "https://httpbin.org/delay/1"
+	go echoserver.Start()
+
+	url := "http://127.0.0.1:7893"
 	q, _ := queue.New(2, queue.NewInMemory(10000))
-	c := roddy.NewCollector(roddy.QuitInSeconds(3), roddy.AllowURLRevisit(true))
+
+	c := roddy.NewCollector(
+		roddy.AllowURLRevisit(true),
+		roddy.Async(true),
+		roddy.RandomDelay(2*time.Second),
+		roddy.Parallelism(2),
+	)
+
+	defer c.QuitOnTimeout()
 
 	c.OnRequest(func(r *roddy.Request) {
 		fmt.Println("visiting", r.String())

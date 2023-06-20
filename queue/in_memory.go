@@ -37,7 +37,7 @@ func (q *InMemoryQueueStorage) AddRequest(r []byte) error {
 	q.lock.Lock()
 	defer q.lock.Unlock()
 
-	if q.MaxSize > 0 && q.size > q.MaxSize {
+	if q.MaxSize > 0 && q.size >= q.MaxSize {
 		return roddy.ErrQueueFull
 	}
 

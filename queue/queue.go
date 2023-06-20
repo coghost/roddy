@@ -1,7 +1,6 @@
 package queue
 
 import (
-	"net/url"
 	"sync"
 
 	"roddy"
@@ -66,12 +65,7 @@ func (q *Queue) Size() (int, error) {
 }
 
 func (q *Queue) AddURL(URL string) error {
-	u, err := urlParser.Parse(URL)
-	if err != nil {
-		return err
-	}
-
-	u2, err := url.Parse(u.Href(false))
+	u2, err := roddy.ParseUrl(URL)
 	if err != nil {
 		return err
 	}
@@ -80,18 +74,13 @@ func (q *Queue) AddURL(URL string) error {
 		URL: u2,
 	}
 
-	buf, err := r.Marshal()
-	if err != nil {
-		return err
-	}
-
-	return q.storage.AddRequest(buf)
+	return q.storeRequest(r)
 }
 
 func (q *Queue) AddRequest(r *roddy.Request) error {
 	q.mut.Lock()
 	waken := q.wake != nil
-	defer q.mut.Unlock()
+	q.mut.Unlock()
 
 	if !waken {
 		return q.storeRequest(r)
@@ -155,20 +144,24 @@ func (q *Queue) loop(c *roddy.Collector, reqChan chan<- *roddy.Request, complete
 		size, err := q.storage.QueueSize()
 		if err != nil {
 			errc <- err
+			break
 		}
 
 		if size == 0 && active == 0 || !q.running {
+			// Terminate when
+			//   1. No active requests
+			//   2. Empty queue
 			errc <- nil
 			break
 		}
 
+		req := &roddy.Request{}
 		sent := reqChan
-
-		var req *roddy.Request
 
 		if size > 0 {
 			req, err = q.loadRequest(c)
 			if err != nil {
+				// ignore error returned by GetRequest() or UnmarshalRequest()
 				continue
 			}
 		} else {
@@ -207,8 +200,8 @@ func (q *Queue) loadRequest(c *roddy.Collector) (*roddy.Request, error) {
 	return c.UnmarshalRequest(copied)
 }
 
-func independentRunner(rrc <-chan *roddy.Request, complete chan<- struct{}) {
-	for req := range rrc {
+func independentRunner(reqChan <-chan *roddy.Request, complete chan<- struct{}) {
+	for req := range reqChan {
 		req.Do()
 		complete <- struct{}{}
 	}

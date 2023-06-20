@@ -26,6 +26,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	log.Info().Str("url", URL).Msg("visiting")
 
 	c := roddy.NewCollector()
+	defer c.QuitOnTimeout(1)
 
 	p := &pageInfo{Links: make(map[string]int)}
 

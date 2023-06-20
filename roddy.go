@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"io"
+	"math/rand"
 	"net/url"
 	"regexp"
 	"sync"
@@ -18,6 +19,7 @@ import (
 	"github.com/coghost/xbot"
 	"github.com/coghost/xpretty"
 	"github.com/coghost/xutil"
+	"github.com/go-rod/rod"
 	"github.com/gookit/goutil/arrutil"
 	"github.com/rs/zerolog/log"
 )
@@ -34,7 +36,8 @@ func (c *Collector) Init() {
 	c.ID = atomic.AddUint32(&collectorCounter, 1)
 	c.userAgent = xbot.UA
 	c.headless = false
-	c.clear = true
+
+	c.wg = &sync.WaitGroup{}
 
 	c.maxDepth = 0
 	c.maxRequests = 0
@@ -49,60 +52,47 @@ func (c *Collector) Init() {
 	c.ctx = context.Background()
 }
 
-func (c *Collector) InitDefaultBot() {
-	proxy := ""
-
-	if len(c.proxies) != 0 {
-		proxy = arrutil.RandomOne(c.proxies)
-	}
-
-	bof := []xbot.BotOptFunc{
-		xbot.BotSpawn(false),
-		xbot.BotScreen(0),
-		xbot.BotHeadless(c.headless),
-		xbot.BotUserAgent(c.userAgent),
-		xbot.BotProxyServer(proxy),
-	}
-
-	c.Bot = xbot.NewBot(bof...)
+// Wait returns when the collector jobs are finished
+func (c *Collector) Wait() {
+	c.wg.Wait()
 }
 
-func (c *Collector) Clear() {
-	if !c.clear {
-		return
-	}
-
-	if c.quitInSeconds < 0 {
-		c.HangUp()
-	} else if c.quitInSeconds > 0 {
-		c.blockInSeconds(c.quitInSeconds)
-	}
-
-	c.Bot.Brw.Close()
-	c.Bot = nil
-}
-
-// HangUp will sleep an hour before quit, so we can check out what happends
-func (c *Collector) HangUp() {
-	xutil.Pause("")
-}
-
-func (c *Collector) MustGoBack() {
+func (c *Collector) MustGoBack(args ...*rod.Page) {
 	if c.maxDepth == 0 {
 		return
 	}
 
-	err := c.Bot.Pg.NavigateBack()
+	page := c.Bot.Pg
+	if len(args) > 0 {
+		page = args[1]
+	}
+
+	err := page.NavigateBack()
 	if err != nil {
 		log.Fatal().Err(err).Msg("cannot go back")
 	}
 
-	c.Bot.Pg.MustWaitLoad()
+	page.MustWaitLoad()
 }
 
-// blockInSeconds blocks collector clear browser with 3(by default) seconds
-func (c *Collector) blockInSeconds(n int) {
-	xpretty.YellowPrintf(">>> quit in %d seconds ", n)
+// QuitOnTimeout blocks collector from close browser with 3(by default) seconds
+//   - if async mode, you should call this directly
+//   - if not async mode, this is enabled if c.quitInSeconds is not zero.
+//
+// about args
+//   - when < 0, hang up until enter pressed
+//   - when > 0, hang up in seconds
+func (c *Collector) QuitOnTimeout(args ...int) {
+	n := xutil.FirstOrDefaultArgs(3, args...)
+	if n == 0 {
+		return
+	}
+
+	if n < 0 {
+		xutil.Pause()
+	}
+
+	xpretty.YellowPrintf(">>> wait for %d seconds before quit browser", n)
 
 	if n <= 60 {
 		TickWithDot(n)
@@ -111,76 +101,65 @@ func (c *Collector) blockInSeconds(n int) {
 
 	fmt.Println()
 	time.Sleep(time.Second * time.Duration(n))
+
+	c.Bot.Close()
 }
 
 func (c *Collector) Visit(URL string) error {
-	defer c.Clear()
-
 	return c.scrape(URL, 1, nil)
 }
 
-func (c *Collector) UnmarshalRequest(r []byte) (*Request, error) {
-	req := &serializableRequest{}
-
-	err := json.Unmarshal(r, req)
-	if err != nil {
-		return nil, err
-	}
-
-	u, err := url.Parse(req.URL)
-	if err != nil {
-		return nil, err
-	}
-
-	ctx := NewContext()
-	for k, v := range req.Ctx {
-		ctx.Put(k, v)
-	}
-
-	return &Request{
-		URL:       u,
-		Depth:     req.Depth,
-		Ctx:       ctx,
-		ID:        atomic.AddUint32(&c.requestCount, 1),
-		collector: c,
-	}, nil
-}
-
 func (c *Collector) scrape(u string, depth int, ctx *Context) error {
-	if c.Bot.Brw == nil {
-		log.Debug().Msg("no bot found, create bot")
-		xbot.Spawn(c.Bot)
-	}
+	c.createBot()
 
-	parsedURL, err := str2URL(u)
+	parsedURL, err := ParseUrl(u)
 	if err != nil {
 		return err
 	}
 
 	if err := c.requestCheck(parsedURL, depth); err != nil {
-		err = c.checkIgnoredError(err)
+		err = c.handleIgnoredErrors(err)
 		return err
+	}
+
+	c.wg.Add(1)
+
+	if c.async {
+		return c.asyncFetch(parsedURL, depth, ctx)
 	}
 
 	return c.fetch(parsedURL, depth, ctx)
 }
 
-func (c *Collector) checkIgnoredError(err error) error {
-	for _, ie := range c.ignoredErrors {
-		if err == ie || errors.Unwrap(err) == ie {
-			return nil
-		}
-	}
+func (c *Collector) asyncFetch(parsedURL *url.URL, depth int, ctx *Context) error {
+	errChan := make(chan error, 1)
 
-	var ave *AlreadyVisitedError
-	if c.ignoreVistedError && errors.As(err, &ave) {
+	go func() {
+		err := c.fetch(parsedURL, depth, ctx)
+		err = c.handleIgnoredErrors(err)
+
+		if err != nil {
+			errChan <- err
+		}
+	}()
+
+	select {
+	case err := <-errChan:
+		return err
+	default:
 		return nil
 	}
-
-	return err
 }
 
 func (c *Collector) fetch(URL *url.URL, depth int, ctx *Context) error {
+	defer c.wg.Done()
+	defer c.randomSleep()
+
+	page := c.createPage()
+	if c.async {
+		defer c.pagePool.Put(page)
+	}
+
 	if ctx == nil {
 		ctx = NewContext()
 	}
@@ -193,9 +172,8 @@ func (c *Collector) fetch(URL *url.URL, depth int, ctx *Context) error {
 		Depth: depth,
 
 		collector: c,
+		page:      page,
 	}
-
-	c.previousURL = URL
 
 	c.handleOnRequest(request)
 
@@ -205,14 +183,18 @@ func (c *Collector) fetch(URL *url.URL, depth int, ctx *Context) error {
 
 	log.Debug().Str("request", request.String()).Msg("visiting")
 
-	err := c.Bot.GetPageE(URL.String())
+	if e := page.Timeout(xbot.MediumToSec * time.Second).Navigate(URL.String()); e != nil {
+		return e
+	}
+
+	err := page.Timeout(xbot.MediumToSec * time.Second).WaitLoad()
 	if err != nil {
 		c.handleOnError(nil, err, request, ctx)
 		return err
 	}
 
 	response := &Response{
-		Page:    c.Bot.Pg,
+		Page:    page,
 		Request: request,
 		Ctx:     ctx,
 	}
@@ -235,6 +217,64 @@ func (c *Collector) fetch(URL *url.URL, depth int, ctx *Context) error {
 	c.handleOnScraped(response)
 
 	return err
+}
+
+func (c *Collector) initDefaultBot() {
+	c.initPagePool()
+
+	proxy := ""
+
+	if len(c.proxies) != 0 {
+		proxy = arrutil.RandomOne(c.proxies)
+	}
+
+	bof := []xbot.BotOptFunc{
+		xbot.BotSpawn(false),
+		xbot.BotScreen(0),
+		xbot.BotHeadless(c.headless),
+		xbot.BotUserAgent(c.userAgent),
+		xbot.BotProxyServer(proxy),
+	}
+
+	c.Bot = xbot.NewBot(bof...)
+}
+
+func (c *Collector) initPagePool() {
+	if !c.async {
+		return
+	}
+
+	// if async mode, force set Parallelism to 1, if is 0
+	c.parallelism = xutil.AorB(c.parallelism, 1)
+	c.pagePool = rod.NewPagePool(c.parallelism)
+}
+
+func (c *Collector) createBot() {
+	if c.Bot.Brw != nil {
+		return
+	}
+
+	log.Trace().Msg("no bot found, create bot")
+	xbot.Spawn(c.Bot)
+
+	// in async mode, after spawn browser and page, put page to pool
+	if c.async {
+		log.Trace().Msg("put default page to page pool")
+		pg := c.pagePool.Get(func() *rod.Page {
+			return c.Bot.Pg
+		})
+		c.pagePool.Put(pg)
+	}
+}
+
+func (c *Collector) createPage() *rod.Page {
+	if !c.async {
+		return c.Bot.Pg
+	}
+
+	return c.pagePool.Get(func() *rod.Page {
+		return xbot.CustomizePage(c.Bot.Brw, c.Bot.Config, xbot.Incognito(true))
+	})
 }
 
 func (c *Collector) requestCheck(parsedURL *url.URL, depth int) error {
@@ -319,8 +359,20 @@ func (c *Collector) isDomainAllowed(domain string) bool {
 	return false
 }
 
-// func (c *Collector) VisitByClick(selector string) error {
-// }
+func (c *Collector) handleIgnoredErrors(err error) error {
+	for _, ie := range c.ignoredErrors {
+		if err == ie || errors.Unwrap(err) == ie {
+			return nil
+		}
+	}
+
+	var ave *AlreadyVisitedError
+	if c.ignoreVistedError && errors.As(err, &ave) {
+		return nil
+	}
+
+	return err
+}
 
 /** Callbacks **/
 
@@ -508,7 +560,7 @@ func (c *Collector) handleOnHTML(resp *Response) error {
 			// WARN: elems are not accessable after page is changed, we have to re-get all elements, then get correct elem by index.
 			elems, err := pg.Elements(cb.Selector)
 			if err != nil || len(elems) == 0 {
-				c.MustGoBack()
+				c.MustGoBack(resp.Page)
 				continue
 			}
 
@@ -520,7 +572,13 @@ func (c *Collector) handleOnHTML(resp *Response) error {
 			e := NewHTMLElement(resp, elems[i], cb.Selector, cbIndex)
 
 			parent := fmt.Sprintf("%s: I-%d/%d", request.IDString(), i, count)
-			target := fmt.Sprintf("#%d | %s[%d] | %s", request.Depth+1, cb.Selector, i, e.Target())
+
+			txt := e.Target()
+			if len(txt) > 32 {
+				txt = xutil.TruncateString(e.Target(), 32) + "..."
+			}
+
+			target := fmt.Sprintf("#%d | %s[%d] | %s", request.Depth+1, cb.Selector, i, txt)
 
 			msg := "spawn"
 			if c.prevRequest != nil && c.prevRequest.ID > request.ID {
@@ -529,7 +587,6 @@ func (c *Collector) handleOnHTML(resp *Response) error {
 
 			// each time when switch from one request to another, we log and highlight it.
 			if c.prevRequest == nil || c.prevRequest.ID != request.ID {
-				log.Debug().Str("with", target).Str("from", parent).Msg(msg)
 				e.Focus(c.highlightCount, c.highlightStyle)
 				c.prevRequest = request
 			}
@@ -543,7 +600,7 @@ func (c *Collector) handleOnHTML(resp *Response) error {
 }
 
 func (c *Collector) handleOnError(response *Response, err error, request *Request, ctx *Context) error {
-	err = c.checkIgnoredError(err)
+	err = c.handleIgnoredErrors(err)
 
 	if err == nil {
 		return nil
@@ -577,6 +634,33 @@ func (c *Collector) handleOnScraped(r *Response) {
 	}
 }
 
+func (c *Collector) UnmarshalRequest(r []byte) (*Request, error) {
+	req := &serializableRequest{}
+
+	err := json.Unmarshal(r, req)
+	if err != nil {
+		return nil, err
+	}
+
+	u, err := url.Parse(req.URL)
+	if err != nil {
+		return nil, err
+	}
+
+	ctx := NewContext()
+	for k, v := range req.Ctx {
+		ctx.Put(k, v)
+	}
+
+	return &Request{
+		URL:       u,
+		Depth:     req.Depth,
+		Ctx:       ctx,
+		ID:        atomic.AddUint32(&c.requestCount, 1),
+		collector: c,
+	}, nil
+}
+
 func isMatchingFilter(fs []*regexp.Regexp, d []byte) bool {
 	for _, r := range fs {
 		if r.Match(d) {
@@ -585,20 +669,6 @@ func isMatchingFilter(fs []*regexp.Regexp, d []byte) bool {
 	}
 
 	return false
-}
-
-func str2URL(u string) (*url.URL, error) {
-	parsedWhatwgURL, err := urlParser.Parse(u)
-	if err != nil {
-		return nil, err
-	}
-
-	parsedURL, err := url.Parse(parsedWhatwgURL.Href(false))
-	if err != nil {
-		return nil, err
-	}
-
-	return parsedURL, nil
 }
 
 func normalizeURL(u string) string {
@@ -621,6 +691,15 @@ func requestHash(url string, body io.Reader) uint64 {
 	}
 
 	return h.Sum64()
+}
+
+func (c *Collector) randomSleep() {
+	rd := time.Duration(0)
+	if c.randomDelay != 0 {
+		rd = time.Duration(rand.Int63n(int64(c.randomDelay)))
+	}
+
+	time.Sleep(c.delay + rd)
 }
 
 func TickWithDot(n int, args ...int) {

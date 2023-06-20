@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"sync"
 
 	"roddy"
 
@@ -9,7 +10,8 @@ import (
 )
 
 func login2scrape() {
-	c := roddy.NewCollector(roddy.QuitInSeconds())
+	c := roddy.NewCollector()
+	defer c.QuitOnTimeout()
 
 	xlog.InitLogForConsole()
 
@@ -28,7 +30,8 @@ func login2scrape() {
 }
 
 func login2spiderbuf() {
-	c := roddy.NewCollector(roddy.QuitInSeconds())
+	c := roddy.NewCollector()
+	defer c.QuitOnTimeout()
 
 	xlog.InitLogForConsole(xlog.WithLevel(1))
 
@@ -46,6 +49,18 @@ func login2spiderbuf() {
 }
 
 func main() {
-	login2scrape()
-	login2spiderbuf()
+	wg := sync.WaitGroup{}
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		login2scrape()
+	}()
+
+	go func() {
+		defer wg.Done()
+		login2spiderbuf()
+	}()
+
+	wg.Wait()
 }

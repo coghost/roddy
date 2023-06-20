@@ -8,7 +8,10 @@ import (
 )
 
 // DefaultPort is the default port to use if once is not specified by the SERVER_PORT environment variable
-const DefaultPort = "7893"
+const (
+	DefaultPort = "7893"
+	ServerURL   = "http://127.0.0.1:" + DefaultPort + "/"
+)
 
 func getServerPort() string {
 	port := os.Getenv("SERVER_PORT")
@@ -31,6 +34,7 @@ func EchoHandler(writer http.ResponseWriter, request *http.Request) {
 	request.Write(writer)
 }
 
+// Start listening on 127.0.0.1:7893
 func Start() {
 	log.Trace().Msg("[ECHO] starting server, listening on port " + getServerPort())
 

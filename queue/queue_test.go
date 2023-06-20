@@ -61,7 +61,10 @@ func (s *QueueSuite) Test_Queue() {
 		storage.AddRequest([]byte("error request"))
 	}
 
-	c := roddy.NewCollector(roddy.AllowURLRevisit(true), roddy.QuitInSeconds())
+	c := roddy.NewCollector(
+		roddy.AllowURLRevisit(true),
+		roddy.RandomDelay(100*time.Millisecond),
+	)
 
 	c.OnRequest(func(r *roddy.Request) {
 		atomic.AddUint32(&requests, 1)

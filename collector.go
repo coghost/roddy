@@ -7,11 +7,12 @@ import (
 	"net/url"
 	"regexp"
 	"sync"
+	"time"
 
 	"roddy/storage"
 
 	"github.com/coghost/xbot"
-	"github.com/coghost/xutil"
+	"github.com/go-rod/rod"
 )
 
 type Collector struct {
@@ -59,9 +60,6 @@ type Collector struct {
 	// store is used to identify if URL is visited or not
 	store storage.Storage
 
-	// previousURL is the url before visiting current one
-	previousURL *url.URL
-
 	serpCallbacks     []*serpCallbackContainer
 	htmlCallbacks     []*htmlCallbackContainer
 	requestCallbacks  []RequestCallback
@@ -81,13 +79,20 @@ type Collector struct {
 
 	prevRequest *Request
 
-	// quitInSeconds
-	//  - when < 0, hang up until enter pressed
-	//  - when > 0, hang up in seconds
-	quitInSeconds int
+	async bool
 
-	// clear will clear created bot resource
-	clear bool
+	wg *sync.WaitGroup
+
+	// delay is the basic delay before create a new request
+	delay time.Duration
+	// randomDelay is the extra delay added to Delay
+	randomDelay time.Duration
+
+	// parallelism is maximum allowed concurrent requests
+	parallelism int
+	pagePool    rod.PagePool
+
+	// limitRule *LimitRule
 
 	lock *sync.RWMutex
 }
@@ -141,8 +146,9 @@ func NewCollector(options ...CollectorOption) *Collector {
 	c.Init()
 	// bind options from args in
 	bindOptions(c, options...)
+
 	// finally setup bot
-	c.InitDefaultBot()
+	c.initDefaultBot()
 
 	return c
 }
@@ -262,19 +268,26 @@ func WithProxies(proxies ...string) CollectorOption {
 	}
 }
 
-// QuitInSeconds by default is 3
-//
-//	@return CollectorOption
-func QuitInSeconds(args ...int) CollectorOption {
-	i := xutil.FirstOrDefaultArgs(3, args...)
-
+func Async(b bool) CollectorOption {
 	return func(c *Collector) {
-		c.quitInSeconds = i
+		c.async = b
 	}
 }
 
-func Clear(b bool) CollectorOption {
+func RandomDelay(t time.Duration) CollectorOption {
 	return func(c *Collector) {
-		c.clear = b
+		c.randomDelay = t
+	}
+}
+
+func Delay(t time.Duration) CollectorOption {
+	return func(c *Collector) {
+		c.delay = t
+	}
+}
+
+func Parallelism(i int) CollectorOption {
+	return func(c *Collector) {
+		c.parallelism = i
 	}
 }
