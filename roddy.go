@@ -5,11 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"hash/fnv"
-	"io"
 	"math/rand"
 	"net/url"
-	"regexp"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -18,7 +15,6 @@ import (
 
 	"github.com/coghost/xbot"
 	"github.com/coghost/xutil"
-	"github.com/go-rod/rod"
 	"github.com/rs/zerolog/log"
 )
 
@@ -46,6 +42,10 @@ func (c *Collector) Init() {
 	c.highlightCount = 2
 	c.highlightStyle = `box-shadow: 0 0 10px rgba(255,125,0,1), 0 0 20px 5px rgba(255,175,0,0.8), 0 0 30px 15px rgba(255,225,0,0.5);`
 
+	c.baseDir = "/tmp/roddy"
+	c.cookieDir = c.baseDir + "/cookies"
+	c.cacheDir = c.baseDir + "/cache"
+
 	c.lock = &sync.RWMutex{}
 	c.ctx = context.Background()
 }
@@ -55,22 +55,16 @@ func (c *Collector) Wait() {
 	c.wg.Wait()
 }
 
-func (c *Collector) MustGoBack(args ...*rod.Page) {
-	if c.maxDepth == 0 {
-		return
+// SetStorage overrides the default in-memory storage.
+// Storage stores scraping related data like cookies and visited urls
+func (c *Collector) SetStorage(s storage.Storage) error {
+	if err := s.Init(); err != nil {
+		return err
 	}
 
-	page := c.Bot.Pg
-	if len(args) > 0 {
-		page = args[1]
-	}
+	c.store = s
 
-	err := page.NavigateBack()
-	if err != nil {
-		log.Fatal().Err(err).Msg("cannot go back")
-	}
-
-	page.MustWaitLoad()
+	return nil
 }
 
 // QuitOnTimeout blocks collector from close browser with 3(by default) seconds
@@ -591,38 +585,6 @@ func (c *Collector) UnmarshalRequest(r []byte) (*Request, error) {
 		ID:        atomic.AddUint32(&c.requestCount, 1),
 		collector: c,
 	}, nil
-}
-
-func isMatchingFilter(fs []*regexp.Regexp, d []byte) bool {
-	for _, r := range fs {
-		if r.Match(d) {
-			return true
-		}
-	}
-
-	return false
-}
-
-func normalizeURL(u string) string {
-	parsed, err := urlParser.Parse(u)
-	if err != nil {
-		return u
-	}
-
-	return parsed.String()
-}
-
-func requestHash(url string, body io.Reader) uint64 {
-	h := fnv.New64a()
-	// reparse the url to fix ambiguities such as
-	// "http://example.com" vs "http://example.com/"
-	io.WriteString(h, normalizeURL(url))
-
-	if body != nil {
-		io.Copy(h, body)
-	}
-
-	return h.Sum64()
 }
 
 func (c *Collector) randomSleep() {

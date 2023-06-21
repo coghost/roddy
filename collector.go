@@ -94,6 +94,10 @@ type Collector struct {
 
 	// limitRule *LimitRule
 
+	baseDir   string
+	cacheDir  string
+	cookieDir string
+
 	lock *sync.RWMutex
 }
 
