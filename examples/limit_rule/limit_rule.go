@@ -22,7 +22,7 @@ func main() {
 		roddy.Async(true),
 		roddy.HighlightCount(4),
 		roddy.RandomDelay(1*time.Second),
-		roddy.Parallelism(2),
+		roddy.Parallelism(4),
 	)
 
 	c.OnHTML("html>body", func(e *roddy.HTMLElement) {
@@ -30,7 +30,7 @@ func main() {
 		fmt.Println("[from]", e.Request.IDString(), "[got]", txt)
 	})
 
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 20; i++ {
 		c.Visit(fmt.Sprintf("%s?n=%d", echoserver.ServerURL, i))
 	}
 

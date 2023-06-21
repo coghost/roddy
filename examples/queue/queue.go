@@ -17,14 +17,13 @@ func main() {
 
 	go echoserver.Start()
 
-	url := "http://127.0.0.1:7893"
-	q, _ := queue.New(2, queue.NewInMemory(10000))
+	url := echoserver.ServerURL
+	q, _ := queue.New(4, queue.NewInMemory(10000))
 
 	c := roddy.NewCollector(
 		roddy.AllowURLRevisit(true),
-		roddy.Async(true),
-		roddy.RandomDelay(2*time.Second),
-		roddy.Parallelism(2),
+		roddy.Parallelism(4),
+		roddy.RandomDelay(10*time.Second),
 	)
 
 	defer c.QuitOnTimeout()
@@ -38,7 +37,7 @@ func main() {
 		}
 	})
 
-	for i := 0; i < 5; i++ {
+	for i := 0; i < 40; i++ {
 		q.AddURL(fmt.Sprintf("%s?n=%d", url, i))
 	}
 

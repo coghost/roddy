@@ -11,7 +11,6 @@ import (
 	"roddy"
 
 	"github.com/coghost/xlog"
-	"github.com/gookit/goutil/dump"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -31,6 +30,8 @@ func (s *QueueSuite) TearDownSuite() {
 }
 
 func (s *QueueSuite) Test_Queue() {
+	xlog.InitLogDebug()
+
 	server := httptest.NewServer(http.HandlerFunc(serverHandler))
 	defer server.Close()
 
@@ -42,9 +43,11 @@ func (s *QueueSuite) Test_Queue() {
 		failure  uint32
 	)
 
-	storage := NewInMemory(100)
+	storage := NewInMemory(100000)
 
-	q, err := New(2, storage)
+	_cap := 4
+
+	q, err := New(_cap, storage)
 	if err != nil {
 		panic(err)
 	}
@@ -63,6 +66,7 @@ func (s *QueueSuite) Test_Queue() {
 
 	c := roddy.NewCollector(
 		roddy.AllowURLRevisit(true),
+		roddy.Parallelism(_cap),
 		roddy.RandomDelay(100*time.Millisecond),
 	)
 
@@ -88,13 +92,12 @@ func (s *QueueSuite) Test_Queue() {
 	})
 
 	err = q.Run(c)
+
 	s.Nil(err, "Queue.Run() returns no error")
 
 	s.Equal(items, requests, "items equal with requests")
 	s.Equal(success+failure, requests, "success+failure equal with requests")
-	s.Greater(failure, uint32(0), "has failures")
-
-	dump.P(items, requests, success, failure)
+	s.LessOrEqual(failure, uint32(0), "has failures")
 }
 
 func serverHandler(w http.ResponseWriter, req *http.Request) {

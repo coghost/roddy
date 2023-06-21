@@ -53,7 +53,7 @@ func New(threads int, s Storage) (*Queue, error) {
 	}, nil
 }
 
-// IsEmpty returns true if the queue is empty.
+// IsEmpty returns true if the queue is empty
 func (q *Queue) IsEmpty() bool {
 	s, _ := q.Size()
 	return s == 0
