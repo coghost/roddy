@@ -17,7 +17,6 @@ import (
 	"roddy/storage"
 
 	"github.com/coghost/xbot"
-	"github.com/coghost/xpretty"
 	"github.com/coghost/xutil"
 	"github.com/go-rod/rod"
 	"github.com/rs/zerolog/log"
@@ -91,15 +90,7 @@ func (c *Collector) QuitOnTimeout(args ...int) {
 		xutil.Pause()
 	}
 
-	xpretty.YellowPrintf(">>> wait for %d seconds before quit browser", n)
-
-	if n <= 60 {
-		TickWithDot(n)
-		return
-	}
-
-	fmt.Println()
-	time.Sleep(time.Second * time.Duration(n))
+	Spin(n)
 
 	c.Bot.Close()
 }
@@ -641,21 +632,4 @@ func (c *Collector) randomSleep() {
 	}
 
 	time.Sleep(c.delay + rd)
-}
-
-func TickWithDot(n int, args ...int) {
-	perLine := xutil.FirstOrDefaultArgs(10, args...)
-	if perLine <= 0 {
-		perLine = 1
-	}
-
-	for i := 0; i < n; i++ {
-		time.Sleep(time.Second * time.Duration(1))
-		xpretty.YellowPrintf(".")
-
-		if (i+1)%perLine == 0 {
-			fmt.Println()
-		}
-	}
-	fmt.Println()
 }
