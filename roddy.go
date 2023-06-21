@@ -84,9 +84,8 @@ func (c *Collector) QuitOnTimeout(args ...int) {
 		xutil.Pause()
 	}
 
+	// c.Bot.Close()
 	Spin(n)
-
-	c.Bot.Close()
 }
 
 func (c *Collector) Visit(URL string) error {
@@ -94,8 +93,6 @@ func (c *Collector) Visit(URL string) error {
 }
 
 func (c *Collector) scrape(u string, depth int, ctx *Context) error {
-	c.createBot()
-
 	parsedURL, err := ParseUrl(u)
 	if err != nil {
 		return err
@@ -129,6 +126,7 @@ func (c *Collector) asyncFetch(parsedURL *url.URL, depth int, ctx *Context) erro
 
 	select {
 	case err := <-errChan:
+		log.Error().Err(err).Msg("got err")
 		return err
 	default:
 		return nil
@@ -139,10 +137,7 @@ func (c *Collector) fetch(URL *url.URL, depth int, ctx *Context) error {
 	defer c.wg.Done()
 	defer c.randomSleep()
 
-	page := c.createPage()
-	if c.async {
-		defer c.pagePool.Put(page)
-	}
+	bot, page := c.createPage()
 
 	if ctx == nil {
 		ctx = NewContext()
@@ -156,6 +151,7 @@ func (c *Collector) fetch(URL *url.URL, depth int, ctx *Context) error {
 		Depth: depth,
 
 		collector: c,
+		bot:       bot,
 		page:      page,
 	}
 
@@ -186,7 +182,7 @@ func (c *Collector) fetch(URL *url.URL, depth int, ctx *Context) error {
 	c.responseCount++
 	c.handleOnResponse(response)
 
-	err = c.handleOnSerp(response)
+	err = c.handleOnSerp(bot, response)
 	if err != nil {
 		err = c.handleOnError(response, err, request, ctx)
 		return err
@@ -314,18 +310,17 @@ func (c *Collector) handleIgnoredErrors(err error) error {
 // OnRequest
 func (c *Collector) OnRequest(f RequestCallback) {
 	c.lock.Lock()
-	defer c.lock.Unlock()
 
 	if c.requestCallbacks == nil {
 		c.requestCallbacks = make([]RequestCallback, 0, _capacity)
 	}
 
 	c.requestCallbacks = append(c.requestCallbacks, f)
+	c.lock.Unlock()
 }
 
 func (c *Collector) OnSerp(selector string, f SerpCallback) {
 	c.lock.Lock()
-	defer c.lock.Unlock()
 
 	if c.serpCallbacks == nil {
 		c.serpCallbacks = make([]*serpCallbackContainer, 0, _capacity)
@@ -335,6 +330,7 @@ func (c *Collector) OnSerp(selector string, f SerpCallback) {
 		Selector: selector,
 		Function: f,
 	})
+	c.lock.Unlock()
 }
 
 func (c *Collector) OnHTML(selector string, f HTMLCallback, opts ...OnHTMLOptionFunc) {
@@ -358,13 +354,14 @@ func (c *Collector) OnHTML(selector string, f HTMLCallback, opts ...OnHTMLOption
 // OnResponse handle on response.
 func (c *Collector) OnResponse(f ResponseCallback) {
 	c.lock.Lock()
-	defer c.lock.Unlock()
 
 	if c.responseCallbacks == nil {
 		c.responseCallbacks = make([]ResponseCallback, 0, _capacity)
 	}
 
 	c.responseCallbacks = append(c.responseCallbacks, f)
+
+	c.lock.Unlock()
 }
 
 // OnError registers a function. Function will be executed if an error
@@ -424,7 +421,7 @@ func (c *Collector) handleOnResponse(r *Response) {
 	}
 }
 
-func (c *Collector) handleOnSerp(resp *Response) error {
+func (c *Collector) handleOnSerp(bot *xbot.Bot, resp *Response) error {
 	if len(c.serpCallbacks) == 0 {
 		return nil
 	}
@@ -437,8 +434,8 @@ func (c *Collector) handleOnSerp(resp *Response) error {
 			continue
 		}
 
-		c.Bot.BindRoot(elem)
-		defer c.Bot.ResetRoot()
+		bot.BindRoot(elem)
+		defer bot.ResetRoot()
 
 		e := NewSerpElement(resp, elem, cb.Selector, cbIndex)
 		cb.Function(e)

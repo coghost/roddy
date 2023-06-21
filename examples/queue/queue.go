@@ -18,12 +18,13 @@ func main() {
 	go echoserver.Start()
 
 	url := echoserver.ServerURL
-	q, _ := queue.New(4, queue.NewInMemory(10000))
+	_cap := 4
+	q, _ := queue.New(_cap, queue.NewInMemory(10000))
 
 	c := roddy.NewCollector(
 		roddy.AllowURLRevisit(true),
-		roddy.Parallelism(4),
-		roddy.RandomDelay(10*time.Second),
+		roddy.Parallelism(_cap),
+		roddy.RandomDelay(4*time.Second),
 	)
 
 	defer c.QuitOnTimeout()

@@ -20,7 +20,7 @@ func main() {
 			"120.197.40.219:9002",
 		),
 	)
-	defer c.QuitOnTimeout()
+	defer c.QuitOnTimeout(1)
 
 	rand.New(rand.NewSource(time.Now().Unix()))
 

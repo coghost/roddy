@@ -8,7 +8,6 @@ import (
 	"github.com/go-rod/rod"
 	"github.com/gookit/goutil/arrutil"
 	"github.com/rs/zerolog/log"
-	"github.com/ungerik/go-dry"
 )
 
 func (c *Collector) MustGoBack(args ...*rod.Page) {
@@ -16,9 +15,11 @@ func (c *Collector) MustGoBack(args ...*rod.Page) {
 		return
 	}
 
-	page := c.Bot.Pg
+	var page *rod.Page
 	if len(args) > 0 {
 		page = args[1]
+	} else {
+		panic("page is required")
 	}
 
 	err := page.NavigateBack()
@@ -29,32 +30,68 @@ func (c *Collector) MustGoBack(args ...*rod.Page) {
 	page.MustWaitLoad()
 }
 
-func (c *Collector) DumpCookies() error {
-	ck, err := c.getCookieName(c.Bot.CurrentUrl())
-	if err != nil {
-		return err
-	}
+// func (c *Collector) DumpCookies() error {
+// 	ck, err := c.getCookieName(c.Bot.CurrentUrl())
+// 	if err != nil {
+// 		return err
+// 	}
 
-	return dry.FileSetJSON(ck, c.Bot.Pg.MustCookies())
+// 	return dry.FileSetJSON(ck, c.Bot.Pg.MustCookies())
+// }
+
+// func (c *Collector) SetCookies(url string, page *rod.Page) error {
+// 	ck, err := c.getCookieName(url)
+// 	if err != nil {
+// 		return err
+// 	}
+
+// 	raw, err := dry.FileGetString(ck)
+// 	if err != nil {
+// 		return err
+// 	}
+
+// 	return c.Bot.SetPageWithCookies(page, raw)
+// }
+
+func (c *Collector) initBotPagePool() {
+	c.parallelism = xutil.AorB(c.parallelism, 1)
+	c.botPool = NewBotPool(c.parallelism)
+	c.pagePool = rod.NewPagePool(c.parallelism)
 }
 
-func (c *Collector) SetCookies(url string, page *rod.Page) error {
-	ck, err := c.getCookieName(url)
-	if err != nil {
-		return err
-	}
+func (c *Collector) createPage() (*xbot.Bot, *rod.Page) {
+	log.Trace().Msg("try get page")
 
-	raw, err := dry.FileGetString(ck)
-	if err != nil {
-		return err
-	}
+	bot := c.createBot()
 
-	return c.Bot.SetPageWithCookies(page, raw)
+	page := c.pagePool.Get(func() *rod.Page {
+		page := xbot.CustomizePage(bot.Brw, xbot.Incognito(true))
+		return page
+	})
+
+	defer c.botPool.Put(bot)
+	defer c.pagePool.Put(page)
+
+	log.Trace().Str("page", page.String()).Msg("got page")
+
+	return bot, page
 }
 
-func (c *Collector) initDefaultBot() {
-	c.initPagePool()
+func (c *Collector) createBot() *xbot.Bot {
+	log.Trace().Msg("try get bot")
 
+	bot := c.botPool.Get(func() *xbot.Bot {
+		bot := c.newBot()
+		xbot.SpawnBrowserOnly(bot)
+		return bot
+	})
+
+	log.Trace().Str("botId", bot.UniqueID).Msg("got bot")
+
+	return bot
+}
+
+func (c *Collector) newBot() *xbot.Bot {
 	proxy := ""
 
 	if len(c.proxies) != 0 {
@@ -69,50 +106,7 @@ func (c *Collector) initDefaultBot() {
 		xbot.BotProxyServer(proxy),
 	}
 
-	c.Bot = xbot.NewBot(bof...)
-}
-
-func (c *Collector) initPagePool() {
-	if !c.async {
-		return
-	}
-
-	// if async mode, force set Parallelism to 1, if is 0
-	c.parallelism = xutil.AorB(c.parallelism, 1)
-	c.pagePool = rod.NewPagePool(c.parallelism)
-}
-
-func (c *Collector) createBot() {
-	if c.Bot.Brw != nil {
-		return
-	}
-
-	log.Trace().Msg("no bot found, create bot")
-	xbot.Spawn(c.Bot)
-
-	// in async mode, after spawn browser and page, put page to pool
-	if c.async {
-		log.Trace().Msg("put default page to page pool")
-
-		pg := c.pagePool.Get(func() *rod.Page {
-			return c.Bot.Pg
-		})
-		c.pagePool.Put(pg)
-	}
-}
-
-func (c *Collector) createPage() *rod.Page {
-	if !c.async {
-		return c.Bot.Pg
-	}
-
-	brw := c.Bot.Brw
-
-	return c.pagePool.Get(func() *rod.Page {
-		// to run page paralell, incognito mode required.
-		page := xbot.CustomizePage(brw, xbot.Incognito(true))
-		return page
-	})
+	return xbot.NewBot(bof...)
 }
 
 func (c *Collector) getCookieName(url string) (string, error) {

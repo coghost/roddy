@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"github.com/coghost/xbot"
 	"github.com/go-rod/rod"
 	whatwgUrl "github.com/nlnwa/whatwg-url/url"
 )
@@ -29,6 +30,7 @@ type Request struct {
 
 	baseURL   *url.URL
 	collector *Collector
+	bot       *xbot.Bot
 	page      *rod.Page
 }
 
@@ -76,12 +78,12 @@ func (r *Request) AbsoluteURL(u string) string {
 }
 
 func (r *Request) IDString() string {
-	pg := ""
+	pg := r.bot.UniqueID
 	if r.page != nil {
-		pg = r.page.String()
+		pg = fmt.Sprintf("<%s:%s>", pg, r.page.String()[6:14])
 	}
 
-	return fmt.Sprintf("C-%d#%d%s.R-%d", r.collector.ID, r.Depth, pg, r.ID)
+	return fmt.Sprintf("C-%d#%d(%s).R-%d", r.collector.ID, r.Depth, pg, r.ID)
 }
 
 func (r *Request) String() string {

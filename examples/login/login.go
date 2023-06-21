@@ -11,7 +11,7 @@ import (
 
 func login2scrape() {
 	c := roddy.NewCollector()
-	defer c.QuitOnTimeout()
+	// defer c.QuitOnTimeout()
 
 	xlog.InitLogForConsole()
 
@@ -48,7 +48,7 @@ func login2spiderbuf() {
 	c.Visit("http://www.spiderbuf.cn/e01/")
 }
 
-func main() {
+func runAsync() {
 	wg := sync.WaitGroup{}
 	wg.Add(2)
 
@@ -63,4 +63,8 @@ func main() {
 	}()
 
 	wg.Wait()
+}
+
+func main() {
+	runAsync()
 }

@@ -92,6 +92,11 @@ type Collector struct {
 	parallelism int
 	pagePool    rod.PagePool
 
+	browserPool     rod.BrowserPool
+	withBrowserPool bool
+
+	botPool BotPool
+
 	// limitRule *LimitRule
 
 	baseDir   string
@@ -152,7 +157,8 @@ func NewCollector(options ...CollectorOption) *Collector {
 	bindOptions(c, options...)
 
 	// finally setup bot
-	c.initDefaultBot()
+	// c.initDefaultBot()
+	c.initBotPagePool()
 
 	return c
 }
@@ -293,5 +299,11 @@ func Delay(t time.Duration) CollectorOption {
 func Parallelism(i int) CollectorOption {
 	return func(c *Collector) {
 		c.parallelism = i
+	}
+}
+
+func WithBrowserPool(b bool) CollectorOption {
+	return func(c *Collector) {
+		c.withBrowserPool = b
 	}
 }
