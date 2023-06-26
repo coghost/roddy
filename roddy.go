@@ -35,8 +35,6 @@ func (c *Collector) Init() {
 	c.userAgent = xbot.UA
 	c.headless = false
 
-	c.wg = &sync.WaitGroup{}
-
 	c.maxDepth = 0
 	c.maxRequests = 0
 
@@ -117,9 +115,8 @@ func (c *Collector) scrape(u string, depth int, ctx *Context) error {
 		return err
 	}
 
-	c.wg.Add(1)
-
 	if c.async {
+		c.wg.Add()
 		return c.asyncFetch(parsedURL, depth, ctx)
 	}
 
@@ -148,7 +145,9 @@ func (c *Collector) asyncFetch(parsedURL *url.URL, depth int, ctx *Context) erro
 }
 
 func (c *Collector) fetch(URL *url.URL, depth int, ctx *Context) error {
-	defer c.wg.Done()
+	if c.async {
+		defer c.wg.Done()
+	}
 	defer c.randomSleep()
 
 	bot, page := c.createPage()
@@ -346,7 +345,6 @@ func (c *Collector) OnSerp(selector string, f SerpCallback) {
 
 func (c *Collector) OnHTML(selector string, f HTMLCallback, opts ...OnHTMLOptionFunc) {
 	c.lock.Lock()
-	defer c.lock.Unlock()
 
 	opt := OnHTMLOptions{deferFunc: func(p *rod.Page) {}}
 	bindOnHTMLOptions(&opt, opts...)
@@ -360,6 +358,8 @@ func (c *Collector) OnHTML(selector string, f HTMLCallback, opts ...OnHTMLOption
 		Function:  f,
 		DeferFunc: opt.deferFunc,
 	})
+
+	c.lock.Unlock()
 }
 
 // OnResponse handle on response.
@@ -379,13 +379,14 @@ func (c *Collector) OnResponse(f ResponseCallback) {
 // occurs during the HTTP request.
 func (c *Collector) OnError(f ErrorCallback) {
 	c.lock.Lock()
-	defer c.lock.Unlock()
 
 	if c.errorCallbacks == nil {
 		c.errorCallbacks = make([]ErrorCallback, 0, _capacity)
 	}
 
 	c.errorCallbacks = append(c.errorCallbacks, f)
+
+	c.lock.Unlock()
 }
 
 // OnHTMLDetach deregister a function. Function will not be execute after detached
@@ -411,13 +412,14 @@ func (c *Collector) OnHTMLDetach(goquerySelector string) {
 // OnHTML, as a final part of the scraping.
 func (c *Collector) OnScraped(f ScrapedCallback) {
 	c.lock.Lock()
-	defer c.lock.Unlock()
 
 	if c.scrapedCallbacks == nil {
 		c.scrapedCallbacks = make([]ScrapedCallback, 0, 4)
 	}
 
 	c.scrapedCallbacks = append(c.scrapedCallbacks, f)
+
+	c.lock.Unlock()
 }
 
 func (c *Collector) handleOnRequest(r *Request) {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"roddy/examples/echoserver"
@@ -24,10 +25,15 @@ func main() {
 	c := roddy.NewCollector(
 		roddy.AllowURLRevisit(true),
 		roddy.Parallelism(_cap),
-		roddy.RandomDelay(4*time.Second),
+		roddy.RandomDelay(2*time.Second),
 	)
 
 	defer c.QuitOnTimeout()
+
+	c.OnHTML("html>body", func(e *roddy.HTMLElement) {
+		txt := strings.Split(e.Text(), "\n")[0]
+		fmt.Println("[from]", e.Request.IDString(), "[got]", txt)
+	})
 
 	c.OnRequest(func(r *roddy.Request) {
 		fmt.Println("visiting", r.String())
@@ -38,7 +44,7 @@ func main() {
 		}
 	})
 
-	for i := 0; i < 40; i++ {
+	for i := 0; i < 10; i++ {
 		q.AddURL(fmt.Sprintf("%s?n=%d", url, i))
 	}
 

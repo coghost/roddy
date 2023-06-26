@@ -4,9 +4,13 @@ import (
 	"fmt"
 
 	"roddy"
+
+	"github.com/coghost/xlog"
 )
 
 func main() {
+	xlog.InitLogDebug()
+
 	c := roddy.NewCollector()
 	defer c.QuitOnTimeout()
 

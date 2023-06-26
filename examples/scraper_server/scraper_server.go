@@ -7,6 +7,7 @@ import (
 	"roddy"
 
 	"github.com/coghost/xlog"
+	"github.com/k0kubun/pp/v3"
 	"github.com/rs/zerolog/log"
 )
 
@@ -61,6 +62,8 @@ func main() {
 	xlog.InitLogForConsole(xlog.WithLevel(0))
 
 	addr := ":7171"
+
+	pp.Println("USAGE: http://127.0.0.1:7171/?url=http://go-colly.org/")
 
 	http.HandleFunc("/", handler)
 	log.Info().Str("addr", addr).Msg("listening on")

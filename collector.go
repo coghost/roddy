@@ -11,13 +11,11 @@ import (
 
 	"roddy/storage"
 
-	"github.com/coghost/xbot"
 	"github.com/go-rod/rod"
+	"github.com/remeh/sizedwaitgroup"
 )
 
 type Collector struct {
-	// Bot can be called out of collector
-	Bot *xbot.Bot
 	// ID is the unique identifier of a collector
 	ID uint32
 
@@ -81,7 +79,7 @@ type Collector struct {
 
 	async bool
 
-	wg *sync.WaitGroup
+	wg sizedwaitgroup.SizedWaitGroup
 
 	// delay is the basic delay before create a new request
 	delay time.Duration
@@ -92,10 +90,7 @@ type Collector struct {
 	parallelism int
 	pagePool    rod.PagePool
 
-	browserPool     rod.BrowserPool
-	withBrowserPool bool
-
-	botPool BotPool
+	botPool *BotPoolManager
 
 	// limitRule *LimitRule
 
@@ -301,11 +296,5 @@ func Delay(t time.Duration) CollectorOption {
 func Parallelism(i int) CollectorOption {
 	return func(c *Collector) {
 		c.parallelism = i
-	}
-}
-
-func WithBrowserPool(b bool) CollectorOption {
-	return func(c *Collector) {
-		c.withBrowserPool = b
 	}
 }
