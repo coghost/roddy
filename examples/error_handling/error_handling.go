@@ -4,10 +4,15 @@ import (
 	"fmt"
 
 	"roddy"
+
+	"github.com/coghost/xlog"
 )
 
 func main() {
+	xlog.InitLogDebug()
+
 	c := roddy.NewCollector()
+	defer c.QuitOnTimeout()
 
 	c.OnHTML("*", func(e *roddy.HTMLElement) {
 		fmt.Println(e)

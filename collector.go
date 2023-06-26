@@ -157,8 +157,10 @@ func NewCollector(options ...CollectorOption) *Collector {
 	bindOptions(c, options...)
 
 	// finally setup bot
-	// c.initDefaultBot()
 	c.initBotPagePool()
+
+	// ctrl+c cannot break running collector, have to use signal to handle it.
+	c.registerCtrlC()
 
 	return c
 }

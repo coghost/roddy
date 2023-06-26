@@ -15,7 +15,7 @@ type htmlCallbackContainer struct {
 	Selector string
 	Function HTMLCallback
 
-	DeferFunc func()
+	DeferFunc func(p *rod.Page)
 }
 
 type HTMLElement struct {

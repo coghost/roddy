@@ -7,14 +7,18 @@ import (
 	"fmt"
 	"math/rand"
 	"net/url"
+	"os"
+	"os/signal"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"roddy/storage"
 
 	"github.com/coghost/xbot"
 	"github.com/coghost/xutil"
+	"github.com/go-rod/rod"
 	"github.com/rs/zerolog/log"
 )
 
@@ -48,6 +52,16 @@ func (c *Collector) Init() {
 
 	c.lock = &sync.RWMutex{}
 	c.ctx = context.Background()
+}
+
+func (c *Collector) registerCtrlC() {
+	ch := make(chan os.Signal)
+	signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
+
+	go func() {
+		<-ch
+		os.Exit(1)
+	}()
 }
 
 // Wait returns when the collector jobs are finished
@@ -85,7 +99,7 @@ func (c *Collector) QuitOnTimeout(args ...int) {
 	}
 
 	// c.Bot.Close()
-	Spin(n)
+	SleepWithSpin(n)
 }
 
 func (c *Collector) Visit(URL string) error {
@@ -163,14 +177,13 @@ func (c *Collector) fetch(URL *url.URL, depth int, ctx *Context) error {
 
 	log.Debug().Str("request", request.String()).Msg("visiting")
 
-	if e := page.Timeout(xbot.MediumToSec * time.Second).Navigate(URL.String()); e != nil {
-		return e
+	if err := page.Timeout(xbot.MediumToSec * time.Second).Navigate(URL.String()); err != nil {
+		return c.handleOnError(nil, err, request, ctx)
 	}
 
 	err := page.Timeout(xbot.MediumToSec * time.Second).WaitLoad()
 	if err != nil {
-		c.handleOnError(nil, err, request, ctx)
-		return err
+		return c.handleOnError(nil, err, request, ctx)
 	}
 
 	response := &Response{
@@ -184,14 +197,12 @@ func (c *Collector) fetch(URL *url.URL, depth int, ctx *Context) error {
 
 	err = c.handleOnSerp(bot, response)
 	if err != nil {
-		err = c.handleOnError(response, err, request, ctx)
-		return err
+		return c.handleOnError(response, err, request, ctx)
 	}
 
 	err = c.handleOnHTML(response)
 	if err != nil {
-		err = c.handleOnError(response, err, request, ctx)
-		return err
+		return c.handleOnError(response, err, request, ctx)
 	}
 
 	c.handleOnScraped(response)
@@ -337,7 +348,7 @@ func (c *Collector) OnHTML(selector string, f HTMLCallback, opts ...OnHTMLOption
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
-	opt := OnHTMLOptions{deferFunc: func() {}}
+	opt := OnHTMLOptions{deferFunc: func(p *rod.Page) {}}
 	bindOnHTMLOptions(&opt, opts...)
 
 	if c.htmlCallbacks == nil {
@@ -455,7 +466,7 @@ func (c *Collector) handleOnHTML(resp *Response) error {
 	for cbIndex, cb := range c.htmlCallbacks {
 		// after current page's elements are handled, go back
 		if cb.DeferFunc != nil {
-			defer cb.DeferFunc()
+			defer cb.DeferFunc(resp.Page)
 		}
 
 		pg := resp.Page
@@ -483,7 +494,7 @@ func (c *Collector) handleOnHTML(resp *Response) error {
 			// WARN: elems are not accessable after page is changed, we have to re-get all elements, then get correct elem by index.
 			elems, err := pg.Elements(cb.Selector)
 			if err != nil || len(elems) == 0 {
-				c.MustGoBack(resp.Page)
+				c.MustGoBack(pg)
 				continue
 			}
 

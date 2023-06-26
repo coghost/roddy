@@ -10,16 +10,9 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-func (c *Collector) MustGoBack(args ...*rod.Page) {
+func (c *Collector) MustGoBack(page *rod.Page) {
 	if c.maxDepth == 0 {
 		return
-	}
-
-	var page *rod.Page
-	if len(args) > 0 {
-		page = args[1]
-	} else {
-		panic("page is required")
 	}
 
 	err := page.NavigateBack()
