@@ -26,7 +26,7 @@ func main() {
 
 	xlog.InitLogForConsole()
 
-	c.OnHTML("body", func(e *roddy.HTMLElement) {
+	c.OnHTML("body", func(e *roddy.SerpElement) {
 		fmt.Println(e.Text())
 	})
 

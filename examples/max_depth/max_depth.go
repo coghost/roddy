@@ -16,12 +16,12 @@ func main() {
 
 	xlog.InitLogForConsole()
 
-	c.OnHTML("head>title", func(e *roddy.HTMLElement) {
+	c.OnHTML("head>title", func(e *roddy.SerpElement) {
 		fmt.Printf("%s got title %s\n", e.Request.String(), e.Text())
 	})
 
 	c.OnHTML(`ul.plainlinks div.wikipedia-languages-langs a[href$='wikipedia.org/wiki/']`,
-		func(e *roddy.HTMLElement) {
+		func(e *roddy.SerpElement) {
 			link := e.Link()
 			fmt.Printf("[From] %s => [Got] %s\n", e.Request.String(), e.Target())
 			e.Request.Visit(link)

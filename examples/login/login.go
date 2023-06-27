@@ -15,13 +15,17 @@ func login2scrape() {
 
 	xlog.InitLogForConsole()
 
-	c.OnSerp("form.el-form", func(e *roddy.SerpElement) {
+	c.OnHTML("form.el-form", func(e *roddy.SerpElement) {
+		e.MarkElemAsRoot()
+
 		e.UpdateText(`input[type="text"]`, "Admin")
 		e.UpdateText(`input[type="password"]`, "123456")
 		e.Click(`button[type="button"]`)
 	})
 
-	c.OnHTML(`a[href="/"]`, func(e *roddy.HTMLElement) {
+	c.OnHTML(`a[href="/"]`, func(e *roddy.SerpElement) {
+		e.ResetRoot()
+
 		cls := e.Attr("class")
 		fmt.Printf("got class: %q\n", cls)
 	})
@@ -35,13 +39,17 @@ func login2spiderbuf() {
 
 	xlog.InitLogForConsole(xlog.WithLevel(1))
 
-	c.OnSerp("form.form-horizontal", func(e *roddy.SerpElement) {
+	c.OnHTML("form.form-horizontal", func(e *roddy.SerpElement) {
+		e.MarkElemAsRoot()
+
 		e.UpdateText(`input#username`, "admin")
 		e.UpdateText(`input#password`, "123456")
 		e.Click(`button.btn`)
+
+		e.ResetRoot()
 	})
 
-	c.OnHTML("table.table>tbody>tr", func(e *roddy.HTMLElement) {
+	c.OnHTML("table.table>tbody>tr", func(e *roddy.SerpElement) {
 		fmt.Println(e.Text())
 	})
 

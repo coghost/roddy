@@ -14,7 +14,7 @@ func main() {
 	c := roddy.NewCollector()
 	defer c.QuitOnTimeout()
 
-	c.OnHTML("*", func(e *roddy.HTMLElement) {
+	c.OnHTML("*", func(e *roddy.SerpElement) {
 		fmt.Println(e)
 	})
 

@@ -21,7 +21,7 @@ func main() {
 
 	xlog.InitLogForConsole()
 
-	c.OnHTML("a[href]", func(e *roddy.HTMLElement) {
+	c.OnHTML("a[href]", func(e *roddy.SerpElement) {
 		link := e.Attr("href")
 		fmt.Printf("Link found: %q -> %s\n", e.Text(), link)
 

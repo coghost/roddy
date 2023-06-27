@@ -12,9 +12,6 @@ import (
 	whatwgUrl "github.com/nlnwa/whatwg-url/url"
 )
 
-// RequestCallback is a type alias for OnRequest callback functions
-type RequestCallback func(*Request)
-
 type Request struct {
 	// ID is the Unique identifier of the request
 	ID uint32

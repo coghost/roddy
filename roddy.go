@@ -194,7 +194,7 @@ func (c *Collector) fetch(URL *url.URL, depth int, ctx *Context) error {
 	c.responseCount++
 	c.handleOnResponse(response)
 
-	err = c.handleOnSerp(bot, response)
+	err = c.handleOnSerp(response)
 	if err != nil {
 		return c.handleOnError(response, err, request, ctx)
 	}
@@ -329,6 +329,19 @@ func (c *Collector) OnRequest(f RequestCallback) {
 	c.lock.Unlock()
 }
 
+// OnResponse handle on response.
+func (c *Collector) OnResponse(f ResponseCallback) {
+	c.lock.Lock()
+
+	if c.responseCallbacks == nil {
+		c.responseCallbacks = make([]ResponseCallback, 0, _capacity)
+	}
+
+	c.responseCallbacks = append(c.responseCallbacks, f)
+
+	c.lock.Unlock()
+}
+
 func (c *Collector) OnSerp(selector string, f SerpCallback) {
 	c.lock.Lock()
 
@@ -343,11 +356,11 @@ func (c *Collector) OnSerp(selector string, f SerpCallback) {
 	c.lock.Unlock()
 }
 
-func (c *Collector) OnHTML(selector string, f HTMLCallback, opts ...OnHTMLOptionFunc) {
+func (c *Collector) OnHTML(selector string, f HTMLCallback, opts ...CallbackOptionFunc) {
 	c.lock.Lock()
 
-	opt := OnHTMLOptions{deferFunc: func(p *rod.Page) {}}
-	bindOnHTMLOptions(&opt, opts...)
+	opt := CallbackOptions{deferFunc: func(p *rod.Page) {}}
+	bindCallbackOptions(&opt, opts...)
 
 	if c.htmlCallbacks == nil {
 		c.htmlCallbacks = make([]*htmlCallbackContainer, 0, _capacity)
@@ -358,33 +371,6 @@ func (c *Collector) OnHTML(selector string, f HTMLCallback, opts ...OnHTMLOption
 		Function:  f,
 		DeferFunc: opt.deferFunc,
 	})
-
-	c.lock.Unlock()
-}
-
-// OnResponse handle on response.
-func (c *Collector) OnResponse(f ResponseCallback) {
-	c.lock.Lock()
-
-	if c.responseCallbacks == nil {
-		c.responseCallbacks = make([]ResponseCallback, 0, _capacity)
-	}
-
-	c.responseCallbacks = append(c.responseCallbacks, f)
-
-	c.lock.Unlock()
-}
-
-// OnError registers a function. Function will be executed if an error
-// occurs during the HTTP request.
-func (c *Collector) OnError(f ErrorCallback) {
-	c.lock.Lock()
-
-	if c.errorCallbacks == nil {
-		c.errorCallbacks = make([]ErrorCallback, 0, _capacity)
-	}
-
-	c.errorCallbacks = append(c.errorCallbacks, f)
 
 	c.lock.Unlock()
 }
@@ -406,6 +392,20 @@ func (c *Collector) OnHTMLDetach(goquerySelector string) {
 	if deleteIdx != -1 {
 		c.htmlCallbacks = append(c.htmlCallbacks[:deleteIdx], c.htmlCallbacks[deleteIdx+1:]...)
 	}
+}
+
+// OnError registers a function. Function will be executed if an error
+// occurs during the HTTP request.
+func (c *Collector) OnError(f ErrorCallback) {
+	c.lock.Lock()
+
+	if c.errorCallbacks == nil {
+		c.errorCallbacks = make([]ErrorCallback, 0, _capacity)
+	}
+
+	c.errorCallbacks = append(c.errorCallbacks, f)
+
+	c.lock.Unlock()
 }
 
 // OnScraped registers a function. Function will be executed after
@@ -434,7 +434,7 @@ func (c *Collector) handleOnResponse(r *Response) {
 	}
 }
 
-func (c *Collector) handleOnSerp(bot *xbot.Bot, resp *Response) error {
+func (c *Collector) handleOnSerp(resp *Response) error {
 	if len(c.serpCallbacks) == 0 {
 		return nil
 	}
@@ -446,9 +446,6 @@ func (c *Collector) handleOnSerp(bot *xbot.Bot, resp *Response) error {
 		if err != nil {
 			continue
 		}
-
-		bot.BindRoot(elem)
-		defer bot.ResetRoot()
 
 		e := NewSerpElement(resp, elem, cb.Selector, cbIndex)
 		cb.Function(e)
@@ -505,7 +502,7 @@ func (c *Collector) handleOnHTML(resp *Response) error {
 				continue
 			}
 
-			e := NewHTMLElement(resp, elems[i], cb.Selector, cbIndex)
+			e := NewSerpElement(resp, elems[i], cb.Selector, cbIndex)
 
 			parent := fmt.Sprintf("%s: I-%d/%d", request.IDString(), i, count)
 

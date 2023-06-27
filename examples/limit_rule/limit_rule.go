@@ -20,7 +20,7 @@ func main() {
 		roddy.Parallelism(4),
 	)
 
-	c.OnHTML("html>body", func(e *roddy.HTMLElement) {
+	c.OnHTML("html>body", func(e *roddy.SerpElement) {
 		fmt.Println("[from]", e.Request.IDString(), "[got]", e.Text())
 	})
 
