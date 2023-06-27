@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"sync"
 
 	"roddy"
 
@@ -10,7 +11,8 @@ import (
 
 func login2scrape() {
 	c := roddy.NewCollector()
-	defer c.HangUpInSeconds()
+	// defer c.QuitOnTimeout()
+
 	xlog.InitLogForConsole()
 
 	c.OnSerp("form.el-form", func(e *roddy.SerpElement) {
@@ -29,7 +31,7 @@ func login2scrape() {
 
 func login2spiderbuf() {
 	c := roddy.NewCollector()
-	defer c.HangUpInSeconds()
+	defer c.QuitOnTimeout()
 
 	xlog.InitLogForConsole(xlog.WithLevel(1))
 
@@ -46,7 +48,23 @@ func login2spiderbuf() {
 	c.Visit("http://www.spiderbuf.cn/e01/")
 }
 
+func runAsync() {
+	wg := sync.WaitGroup{}
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		login2scrape()
+	}()
+
+	go func() {
+		defer wg.Done()
+		login2spiderbuf()
+	}()
+
+	wg.Wait()
+}
+
 func main() {
-	login2scrape()
-	login2spiderbuf()
+	runAsync()
 }

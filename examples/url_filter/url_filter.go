@@ -16,7 +16,9 @@ func main() {
 			regexp.MustCompile("https://github\\.com/req.+"),
 		),
 	)
-	defer c.HangUpInSeconds()
+
+	defer c.QuitOnTimeout()
+
 	xlog.InitLogForConsole()
 
 	c.OnHTML("a[href]", func(e *roddy.HTMLElement) {

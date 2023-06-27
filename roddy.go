@@ -2,22 +2,23 @@ package roddy
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"hash/fnv"
-	"io"
+	"math/rand"
 	"net/url"
-	"regexp"
+	"os"
+	"os/signal"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"roddy/storage"
 
 	"github.com/coghost/xbot"
-	"github.com/coghost/xpretty"
 	"github.com/coghost/xutil"
-	"github.com/gookit/goutil/arrutil"
+	"github.com/go-rod/rod"
 	"github.com/rs/zerolog/log"
 )
 
@@ -43,99 +44,114 @@ func (c *Collector) Init() {
 	c.highlightCount = 2
 	c.highlightStyle = `box-shadow: 0 0 10px rgba(255,125,0,1), 0 0 20px 5px rgba(255,175,0,0.8), 0 0 30px 15px rgba(255,225,0,0.5);`
 
+	c.baseDir = "/tmp/roddy"
+	c.cookieDir = c.baseDir + "/cookies"
+	c.cacheDir = c.baseDir + "/cache"
+
 	c.lock = &sync.RWMutex{}
 	c.ctx = context.Background()
 }
 
-func (c *Collector) InitDefaultBot() {
-	proxy := ""
+func (c *Collector) registerCtrlC() {
+	ch := make(chan os.Signal)
+	signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
 
-	if len(c.proxies) != 0 {
-		proxy = arrutil.RandomOne(c.proxies)
-	}
-
-	bof := []xbot.BotOptFunc{
-		xbot.BotSpawn(false),
-		xbot.BotScreen(0),
-		xbot.BotHeadless(c.headless),
-		xbot.BotUserAgent(c.userAgent),
-		xbot.BotProxyServer(proxy),
-	}
-
-	c.Bot = xbot.NewBot(bof...)
+	go func() {
+		<-ch
+		os.Exit(1)
+	}()
 }
 
-// HangUp will sleep an hour before quit, so we can check out what happends
-func (c *Collector) HangUp() {
-	xutil.Pause("")
+// Wait returns when the collector jobs are finished
+func (c *Collector) Wait() {
+	c.wg.Wait()
 }
 
-func (c *Collector) MustGoBack() {
-	if c.maxDepth == 0 {
+// SetStorage overrides the default in-memory storage.
+// Storage stores scraping related data like cookies and visited urls
+func (c *Collector) SetStorage(s storage.Storage) error {
+	if err := s.Init(); err != nil {
+		return err
+	}
+
+	c.store = s
+
+	return nil
+}
+
+// QuitOnTimeout blocks collector from close browser with 3(by default) seconds
+//   - if async mode, you should call this directly
+//   - if not async mode, this is enabled if c.quitInSeconds is not zero.
+//
+// about args
+//   - when < 0, hang up until enter pressed
+//   - when > 0, hang up in seconds
+func (c *Collector) QuitOnTimeout(args ...int) {
+	n := xutil.FirstOrDefaultArgs(3, args...)
+	if n == 0 {
 		return
 	}
 
-	err := c.Bot.Pg.NavigateBack()
-	if err != nil {
-		log.Fatal().Err(err).Msg("cannot go back")
+	if n < 0 {
+		xutil.Pause()
 	}
 
-	c.Bot.Pg.MustWaitLoad()
-}
-
-// HangUpInSeconds hangs up browser within 3(by default) seconds
-func (c *Collector) HangUpInSeconds(args ...int) {
-	n := xutil.FirstOrDefaultArgs(3, args...)
-	xpretty.YellowPrintf("quit in %d seconds ...\n", n)
-
-	time.Sleep(time.Second * time.Duration(n))
-}
-
-// HangUpHourly sleeps an hour, used when running test
-func (c *Collector) HangUpHourly() {
-	xpretty.YellowPrintf("quit in one hour ...\n")
-	time.Sleep(time.Hour)
+	// c.Bot.Close()
+	SleepWithSpin(n)
 }
 
 func (c *Collector) Visit(URL string) error {
-	if c.Bot.Brw == nil {
-		log.Trace().Msg("no bot found, create bot")
-		xbot.Spawn(c.Bot)
-	}
-
 	return c.scrape(URL, 1, nil)
 }
 
 func (c *Collector) scrape(u string, depth int, ctx *Context) error {
-	parsedURL, err := str2URL(u)
+	parsedURL, err := ParseUrl(u)
 	if err != nil {
 		return err
 	}
 
 	if err := c.requestCheck(parsedURL, depth); err != nil {
-		err = c.checkIgnoredError(err)
+		err = c.handleIgnoredErrors(err)
 		return err
+	}
+
+	if c.async {
+		c.wg.Add()
+		return c.asyncFetch(parsedURL, depth, ctx)
 	}
 
 	return c.fetch(parsedURL, depth, ctx)
 }
 
-func (c *Collector) checkIgnoredError(err error) error {
-	for _, ie := range c.ignoredErrors {
-		if err == ie || errors.Unwrap(err) == ie {
-			return nil
-		}
-	}
+func (c *Collector) asyncFetch(parsedURL *url.URL, depth int, ctx *Context) error {
+	errChan := make(chan error, 1)
 
-	var ave *AlreadyVisitedError
-	if c.ignoreVistedError && errors.As(err, &ave) {
+	go func() {
+		err := c.fetch(parsedURL, depth, ctx)
+		err = c.handleIgnoredErrors(err)
+
+		if err != nil {
+			errChan <- err
+		}
+	}()
+
+	select {
+	case err := <-errChan:
+		log.Error().Err(err).Msg("got err")
+		return err
+	default:
 		return nil
 	}
-
-	return err
 }
 
 func (c *Collector) fetch(URL *url.URL, depth int, ctx *Context) error {
+	if c.async {
+		defer c.wg.Done()
+	}
+	defer c.randomSleep()
+
+	bot, page := c.createPage()
+
 	if ctx == nil {
 		ctx = NewContext()
 	}
@@ -148,9 +164,9 @@ func (c *Collector) fetch(URL *url.URL, depth int, ctx *Context) error {
 		Depth: depth,
 
 		collector: c,
+		bot:       bot,
+		page:      page,
 	}
-
-	c.previousURL = URL
 
 	c.handleOnRequest(request)
 
@@ -160,14 +176,17 @@ func (c *Collector) fetch(URL *url.URL, depth int, ctx *Context) error {
 
 	log.Debug().Str("request", request.String()).Msg("visiting")
 
-	err := c.Bot.GetPageE(URL.String())
+	if err := page.Timeout(xbot.MediumToSec * time.Second).Navigate(URL.String()); err != nil {
+		return c.handleOnError(nil, err, request, ctx)
+	}
+
+	err := page.Timeout(xbot.MediumToSec * time.Second).WaitLoad()
 	if err != nil {
-		c.handleOnError(nil, err, request, ctx)
-		return err
+		return c.handleOnError(nil, err, request, ctx)
 	}
 
 	response := &Response{
-		Page:    c.Bot.Pg,
+		Page:    page,
 		Request: request,
 		Ctx:     ctx,
 	}
@@ -175,16 +194,14 @@ func (c *Collector) fetch(URL *url.URL, depth int, ctx *Context) error {
 	c.responseCount++
 	c.handleOnResponse(response)
 
-	err = c.handleOnSerp(response)
+	err = c.handleOnSerp(bot, response)
 	if err != nil {
-		err = c.handleOnError(response, err, request, ctx)
-		return err
+		return c.handleOnError(response, err, request, ctx)
 	}
 
 	err = c.handleOnHTML(response)
 	if err != nil {
-		err = c.handleOnError(response, err, request, ctx)
-		return err
+		return c.handleOnError(response, err, request, ctx)
 	}
 
 	c.handleOnScraped(response)
@@ -274,8 +291,20 @@ func (c *Collector) isDomainAllowed(domain string) bool {
 	return false
 }
 
-// func (c *Collector) VisitByClick(selector string) error {
-// }
+func (c *Collector) handleIgnoredErrors(err error) error {
+	for _, ie := range c.ignoredErrors {
+		if err == ie || errors.Unwrap(err) == ie {
+			return nil
+		}
+	}
+
+	var ave *AlreadyVisitedError
+	if c.ignoreVistedError && errors.As(err, &ave) {
+		return nil
+	}
+
+	return err
+}
 
 /** Callbacks **/
 
@@ -291,18 +320,17 @@ func (c *Collector) isDomainAllowed(domain string) bool {
 // OnRequest
 func (c *Collector) OnRequest(f RequestCallback) {
 	c.lock.Lock()
-	defer c.lock.Unlock()
 
 	if c.requestCallbacks == nil {
 		c.requestCallbacks = make([]RequestCallback, 0, _capacity)
 	}
 
 	c.requestCallbacks = append(c.requestCallbacks, f)
+	c.lock.Unlock()
 }
 
 func (c *Collector) OnSerp(selector string, f SerpCallback) {
 	c.lock.Lock()
-	defer c.lock.Unlock()
 
 	if c.serpCallbacks == nil {
 		c.serpCallbacks = make([]*serpCallbackContainer, 0, _capacity)
@@ -312,13 +340,13 @@ func (c *Collector) OnSerp(selector string, f SerpCallback) {
 		Selector: selector,
 		Function: f,
 	})
+	c.lock.Unlock()
 }
 
 func (c *Collector) OnHTML(selector string, f HTMLCallback, opts ...OnHTMLOptionFunc) {
 	c.lock.Lock()
-	defer c.lock.Unlock()
 
-	opt := OnHTMLOptions{deferFunc: func() {}}
+	opt := OnHTMLOptions{deferFunc: func(p *rod.Page) {}}
 	bindOnHTMLOptions(&opt, opts...)
 
 	if c.htmlCallbacks == nil {
@@ -330,31 +358,35 @@ func (c *Collector) OnHTML(selector string, f HTMLCallback, opts ...OnHTMLOption
 		Function:  f,
 		DeferFunc: opt.deferFunc,
 	})
+
+	c.lock.Unlock()
 }
 
 // OnResponse handle on response.
 func (c *Collector) OnResponse(f ResponseCallback) {
 	c.lock.Lock()
-	defer c.lock.Unlock()
 
 	if c.responseCallbacks == nil {
 		c.responseCallbacks = make([]ResponseCallback, 0, _capacity)
 	}
 
 	c.responseCallbacks = append(c.responseCallbacks, f)
+
+	c.lock.Unlock()
 }
 
 // OnError registers a function. Function will be executed if an error
 // occurs during the HTTP request.
 func (c *Collector) OnError(f ErrorCallback) {
 	c.lock.Lock()
-	defer c.lock.Unlock()
 
 	if c.errorCallbacks == nil {
 		c.errorCallbacks = make([]ErrorCallback, 0, _capacity)
 	}
 
 	c.errorCallbacks = append(c.errorCallbacks, f)
+
+	c.lock.Unlock()
 }
 
 // OnHTMLDetach deregister a function. Function will not be execute after detached
@@ -380,13 +412,14 @@ func (c *Collector) OnHTMLDetach(goquerySelector string) {
 // OnHTML, as a final part of the scraping.
 func (c *Collector) OnScraped(f ScrapedCallback) {
 	c.lock.Lock()
-	defer c.lock.Unlock()
 
 	if c.scrapedCallbacks == nil {
 		c.scrapedCallbacks = make([]ScrapedCallback, 0, 4)
 	}
 
 	c.scrapedCallbacks = append(c.scrapedCallbacks, f)
+
+	c.lock.Unlock()
 }
 
 func (c *Collector) handleOnRequest(r *Request) {
@@ -401,7 +434,7 @@ func (c *Collector) handleOnResponse(r *Response) {
 	}
 }
 
-func (c *Collector) handleOnSerp(resp *Response) error {
+func (c *Collector) handleOnSerp(bot *xbot.Bot, resp *Response) error {
 	if len(c.serpCallbacks) == 0 {
 		return nil
 	}
@@ -414,8 +447,8 @@ func (c *Collector) handleOnSerp(resp *Response) error {
 			continue
 		}
 
-		c.Bot.BindRoot(elem)
-		defer c.Bot.ResetRoot()
+		bot.BindRoot(elem)
+		defer bot.ResetRoot()
 
 		e := NewSerpElement(resp, elem, cb.Selector, cbIndex)
 		cb.Function(e)
@@ -435,7 +468,7 @@ func (c *Collector) handleOnHTML(resp *Response) error {
 	for cbIndex, cb := range c.htmlCallbacks {
 		// after current page's elements are handled, go back
 		if cb.DeferFunc != nil {
-			defer cb.DeferFunc()
+			defer cb.DeferFunc(resp.Page)
 		}
 
 		pg := resp.Page
@@ -463,14 +496,25 @@ func (c *Collector) handleOnHTML(resp *Response) error {
 			// WARN: elems are not accessable after page is changed, we have to re-get all elements, then get correct elem by index.
 			elems, err := pg.Elements(cb.Selector)
 			if err != nil || len(elems) == 0 {
-				c.MustGoBack()
+				c.MustGoBack(pg)
+				continue
+			}
+
+			if i >= len(elems) {
+				// elems may changed while we re-get all elements.
 				continue
 			}
 
 			e := NewHTMLElement(resp, elems[i], cb.Selector, cbIndex)
 
 			parent := fmt.Sprintf("%s: I-%d/%d", request.IDString(), i, count)
-			target := fmt.Sprintf("#%d | %s[%d] | %s", request.Depth+1, cb.Selector, i, e.Target())
+
+			txt := e.Target()
+			if len(txt) > 32 {
+				txt = xutil.TruncateString(e.Target(), 32) + "..."
+			}
+
+			target := fmt.Sprintf("#%d | %s[%d] | %s", request.Depth+1, cb.Selector, i, txt)
 
 			msg := "spawn"
 			if c.prevRequest != nil && c.prevRequest.ID > request.ID {
@@ -479,7 +523,6 @@ func (c *Collector) handleOnHTML(resp *Response) error {
 
 			// each time when switch from one request to another, we log and highlight it.
 			if c.prevRequest == nil || c.prevRequest.ID != request.ID {
-				log.Debug().Str("with", target).Str("from", parent).Msg(msg)
 				e.Focus(c.highlightCount, c.highlightStyle)
 				c.prevRequest = request
 			}
@@ -493,7 +536,7 @@ func (c *Collector) handleOnHTML(resp *Response) error {
 }
 
 func (c *Collector) handleOnError(response *Response, err error, request *Request, ctx *Context) error {
-	err = c.checkIgnoredError(err)
+	err = c.handleIgnoredErrors(err)
 
 	if err == nil {
 		return nil
@@ -527,48 +570,38 @@ func (c *Collector) handleOnScraped(r *Response) {
 	}
 }
 
-func isMatchingFilter(fs []*regexp.Regexp, d []byte) bool {
-	for _, r := range fs {
-		if r.Match(d) {
-			return true
-		}
-	}
+func (c *Collector) UnmarshalRequest(r []byte) (*Request, error) {
+	req := &serializableRequest{}
 
-	return false
-}
-
-func str2URL(u string) (*url.URL, error) {
-	parsedWhatwgURL, err := urlParser.Parse(u)
+	err := json.Unmarshal(r, req)
 	if err != nil {
 		return nil, err
 	}
 
-	parsedURL, err := url.Parse(parsedWhatwgURL.Href(false))
+	u, err := url.Parse(req.URL)
 	if err != nil {
 		return nil, err
 	}
 
-	return parsedURL, nil
-}
-
-func normalizeURL(u string) string {
-	parsed, err := urlParser.Parse(u)
-	if err != nil {
-		return u
+	ctx := NewContext()
+	for k, v := range req.Ctx {
+		ctx.Put(k, v)
 	}
 
-	return parsed.String()
+	return &Request{
+		URL:       u,
+		Depth:     req.Depth,
+		Ctx:       ctx,
+		ID:        atomic.AddUint32(&c.requestCount, 1),
+		collector: c,
+	}, nil
 }
 
-func requestHash(url string, body io.Reader) uint64 {
-	h := fnv.New64a()
-	// reparse the url to fix ambiguities such as
-	// "http://example.com" vs "http://example.com/"
-	io.WriteString(h, normalizeURL(url))
-
-	if body != nil {
-		io.Copy(h, body)
+func (c *Collector) randomSleep() {
+	rd := time.Duration(0)
+	if c.randomDelay != 0 {
+		rd = time.Duration(rand.Int63n(int64(c.randomDelay)))
 	}
 
-	return h.Sum64()
+	time.Sleep(c.delay + rd)
 }

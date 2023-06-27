@@ -5,6 +5,7 @@ import (
 
 	"github.com/coghost/xbot"
 	"github.com/go-rod/rod"
+	"github.com/k0kubun/pp/v3"
 )
 
 // HTMLCallback is a type alias for OnHTML callback functions
@@ -14,7 +15,7 @@ type htmlCallbackContainer struct {
 	Selector string
 	Function HTMLCallback
 
-	DeferFunc func()
+	DeferFunc func(p *rod.Page)
 }
 
 type HTMLElement struct {
@@ -37,7 +38,7 @@ func NewHTMLElement(resp *Response, elem *rod.Element, name string, index int) *
 		Response: resp,
 		Index:    index,
 
-		Bot: resp.Request.collector.Bot,
+		Bot: xbot.NewBotWithPage(resp.Page),
 	}
 }
 
@@ -88,7 +89,12 @@ func (e *HTMLElement) UpdateText(selector string, text string) (string, error) {
 }
 
 func (e *HTMLElement) Click(selector string) error {
-	return e.Bot.ScrollAndClick(selector)
+	err := e.Bot.ScrollAndClick(selector)
+	if err != nil {
+		pp.Println(err)
+	}
+
+	return err
 }
 
 func (e *HTMLElement) Focus(count int, style string) {

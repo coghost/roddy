@@ -1,6 +1,8 @@
 package roddy
 
-type OnHTMLDeferFn func()
+import "github.com/go-rod/rod"
+
+type OnHTMLDeferFn func(p *rod.Page)
 
 type OnHTMLOptions struct {
 	deferFunc OnHTMLDeferFn
