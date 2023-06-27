@@ -5,6 +5,7 @@ import (
 
 	"github.com/coghost/xbot"
 	"github.com/go-rod/rod"
+	"github.com/go-rod/rod/lib/input"
 	"github.com/k0kubun/pp/v3"
 )
 
@@ -95,6 +96,19 @@ func (e *SerpElement) Click(selector string) error {
 	}
 
 	return err
+}
+
+// ScrollUntilElemInteractable
+func (e *SerpElement) ScrollUntilElemInteractable(selector string, maxStep int) {
+	for i := 0; i < maxStep; i++ {
+		e.DOM.MustKeyActions().Press(input.PageDown).MustDo()
+
+		more := e.bot.GetElem(selector)
+
+		if _, err := more.Interactable(); err == nil {
+			break
+		}
+	}
 }
 
 func (e *SerpElement) Focus(count int, style string) {

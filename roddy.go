@@ -1,6 +1,7 @@
 package roddy
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -16,6 +17,7 @@ import (
 
 	"roddy/storage"
 
+	"github.com/PuerkitoBio/goquery"
 	"github.com/coghost/xbot"
 	"github.com/coghost/xutil"
 	"github.com/go-rod/rod"
@@ -194,12 +196,12 @@ func (c *Collector) fetch(URL *url.URL, depth int, ctx *Context) error {
 	c.responseCount++
 	c.handleOnResponse(response)
 
-	err = c.handleOnSerp(response)
+	err = c.handleOnHTML(response)
 	if err != nil {
 		return c.handleOnError(response, err, request, ctx)
 	}
 
-	err = c.handleOnHTML(response)
+	err = c.handleOnData(response)
 	if err != nil {
 		return c.handleOnError(response, err, request, ctx)
 	}
@@ -311,9 +313,10 @@ func (c *Collector) handleIgnoredErrors(err error) error {
 /**
 - OnRequest
 - OnResponse
-- OnSerp
 - OnHTML
+- OnSerp
 - OnScraped
+
 - OnError
 **/
 
@@ -339,20 +342,6 @@ func (c *Collector) OnResponse(f ResponseCallback) {
 
 	c.responseCallbacks = append(c.responseCallbacks, f)
 
-	c.lock.Unlock()
-}
-
-func (c *Collector) OnSerp(selector string, f SerpCallback) {
-	c.lock.Lock()
-
-	if c.serpCallbacks == nil {
-		c.serpCallbacks = make([]*serpCallbackContainer, 0, _capacity)
-	}
-
-	c.serpCallbacks = append(c.serpCallbacks, &serpCallbackContainer{
-		Selector: selector,
-		Function: f,
-	})
 	c.lock.Unlock()
 }
 
@@ -392,6 +381,20 @@ func (c *Collector) OnHTMLDetach(goquerySelector string) {
 	if deleteIdx != -1 {
 		c.htmlCallbacks = append(c.htmlCallbacks[:deleteIdx], c.htmlCallbacks[deleteIdx+1:]...)
 	}
+}
+
+func (c *Collector) OnData(selector string, f DataCallback) {
+	c.lock.Lock()
+
+	if c.dataCallbacks == nil {
+		c.dataCallbacks = make([]*dataCallbackContainer, 0, _capacity)
+	}
+
+	c.dataCallbacks = append(c.dataCallbacks, &dataCallbackContainer{
+		Selector: selector,
+		Function: f,
+	})
+	c.lock.Unlock()
 }
 
 // OnError registers a function. Function will be executed if an error
@@ -434,21 +437,37 @@ func (c *Collector) handleOnResponse(r *Response) {
 	}
 }
 
-func (c *Collector) handleOnSerp(resp *Response) error {
-	if len(c.serpCallbacks) == 0 {
+func (c *Collector) handleOnData(resp *Response) error {
+	if len(c.dataCallbacks) == 0 {
 		return nil
 	}
 
-	for cbIndex, cb := range c.serpCallbacks {
-		pg := resp.Page
+	doc, err := goquery.NewDocumentFromReader(bytes.NewBuffer([]byte(resp.Page.MustHTML())))
+	if err != nil {
+		return err
+	}
 
-		elem, err := pg.Element(cb.Selector)
-		if err != nil {
-			continue
+	// try parse base from
+	if href, found := doc.Find("base[href]").Attr("href"); found {
+		u, err := urlParser.ParseRef(resp.Request.URL.String(), href)
+		if err == nil {
+			baseURL, err := url.Parse(u.Href(false))
+			if err == nil {
+				resp.Request.baseURL = baseURL
+			}
 		}
+	}
 
-		e := NewSerpElement(resp, elem, cb.Selector, cbIndex)
-		cb.Function(e)
+	for _, cb := range c.dataCallbacks {
+		cbIndex := 0
+
+		doc.Find(cb.Selector).Each(func(_ int, s *goquery.Selection) {
+			for _, n := range s.Nodes {
+				e := NewHTMLElement(s, n, cbIndex)
+				cbIndex++
+				cb.Function(e)
+			}
+		})
 	}
 
 	return nil

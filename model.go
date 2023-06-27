@@ -19,7 +19,7 @@ type HTMLCallback func(e *SerpElement)
 // ScrapedCallback is a type alias for OnScraped callback functions
 type ScrapedCallback func(*Response)
 
-type SerpCallback func(e *SerpElement)
+type DataCallback func(e *DataElement)
 
 type htmlCallbackContainer struct {
 	Selector string
@@ -28,7 +28,7 @@ type htmlCallbackContainer struct {
 	DeferFunc func(p *rod.Page)
 }
 
-type serpCallbackContainer struct {
+type dataCallbackContainer struct {
 	Selector string
-	Function SerpCallback
+	Function DataCallback
 }

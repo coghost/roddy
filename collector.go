@@ -58,7 +58,7 @@ type Collector struct {
 	// store is used to identify if URL is visited or not
 	store storage.Storage
 
-	serpCallbacks     []*serpCallbackContainer
+	dataCallbacks     []*dataCallbackContainer
 	htmlCallbacks     []*htmlCallbackContainer
 	requestCallbacks  []RequestCallback
 	responseCallbacks []ResponseCallback
