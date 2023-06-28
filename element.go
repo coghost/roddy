@@ -69,3 +69,13 @@ func (e *DataElement) Target() string {
 func (e *DataElement) ChildText(selector string) string {
 	return strings.TrimSpace(e.DOM.Find(selector).Text())
 }
+
+// ChildAttr returns the stripped text content of the first matching
+// element's attribute.
+func (h *DataElement) ChildAttr(selector, attrName string) string {
+	if attr, ok := h.DOM.Find(selector).Attr(attrName); ok {
+		return strings.TrimSpace(attr)
+	}
+
+	return ""
+}

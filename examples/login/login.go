@@ -11,23 +11,20 @@ import (
 
 func login2scrape() {
 	c := roddy.NewCollector()
-	// defer c.QuitOnTimeout()
+	defer c.QuitOnTimeout()
 
 	xlog.InitLogForConsole()
 
 	c.OnHTML("form.el-form", func(e *roddy.SerpElement) {
 		e.MarkElemAsRoot()
 
-		e.UpdateText(`input[type="text"]`, "Admin")
-		e.UpdateText(`input[type="password"]`, "123456")
+		e.UpdateText(`input[type="text"]`, "admin")
+		e.UpdateText(`input[type="password"]`, "admin")
 		e.Click(`button[type="button"]`)
 	})
 
-	c.OnHTML(`a[href="/"]`, func(e *roddy.SerpElement) {
-		e.ResetRoot()
-
-		cls := e.Attr("class")
-		fmt.Printf("got class: %q\n", cls)
+	c.OnHTML(`div.el-message--success`, func(e *roddy.SerpElement) {
+		fmt.Println(e.Text())
 	})
 
 	c.Visit("https://login3.scrape.center/login")
@@ -56,23 +53,20 @@ func login2spiderbuf() {
 	c.Visit("http://www.spiderbuf.cn/e01/")
 }
 
-func runAsync() {
+func runAsync(args ...func()) {
 	wg := sync.WaitGroup{}
-	wg.Add(2)
+	for _, fn := range args {
+		wg.Add(1)
 
-	go func() {
-		defer wg.Done()
-		login2scrape()
-	}()
-
-	go func() {
-		defer wg.Done()
-		login2spiderbuf()
-	}()
+		go func(fn func()) {
+			defer wg.Done()
+			fn()
+		}(fn)
+	}
 
 	wg.Wait()
 }
 
 func main() {
-	runAsync()
+	runAsync(login2scrape)
 }

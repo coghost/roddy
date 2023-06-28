@@ -14,7 +14,7 @@ type SerpElement struct {
 
 	DOM *rod.Element
 
-	bot      *xbot.Bot
+	Bot      *xbot.Bot
 	Request  *Request
 	Response *Response
 
@@ -31,7 +31,7 @@ func NewSerpElement(resp *Response, elem *rod.Element, name string, index int) *
 		Response: resp,
 		Index:    index,
 
-		bot: xbot.NewBotWithPage(resp.Page),
+		Bot: xbot.NewBotWithPage(resp.Page),
 	}
 }
 
@@ -40,7 +40,7 @@ func (e *SerpElement) MarkElemAsRoot() {
 }
 
 func (e *SerpElement) ResetRoot() {
-	e.root = e.bot.Pg.MustElement("html")
+	e.root = e.Bot.Pg.MustElement("html")
 }
 
 func (e *SerpElement) Attr(k string) string {
@@ -86,11 +86,11 @@ func (e *SerpElement) Target() string {
 }
 
 func (e *SerpElement) UpdateText(selector string, text string) (string, error) {
-	return e.bot.FillBar(selector, text, xbot.WithRoot(e.root))
+	return e.Bot.FillBar(selector, text, xbot.WithRoot(e.root))
 }
 
 func (e *SerpElement) Click(selector string) error {
-	err := e.bot.ScrollAndClick(selector, xbot.WithRoot(e.root))
+	err := e.Bot.ScrollAndClick(selector, xbot.WithRoot(e.root))
 	if err != nil {
 		pp.Println(err)
 	}
@@ -103,7 +103,7 @@ func (e *SerpElement) ScrollUntilElemInteractable(selector string, maxStep int) 
 	for i := 0; i < maxStep; i++ {
 		e.DOM.MustKeyActions().Press(input.PageDown).MustDo()
 
-		more := e.bot.GetElem(selector)
+		more := e.Bot.GetElem(selector)
 
 		if _, err := more.Interactable(); err == nil {
 			break
@@ -116,6 +116,6 @@ func (e *SerpElement) Focus(count int, style string) {
 		return
 	}
 
-	e.bot.ScrollToElemDirectly(e.DOM)
-	e.bot.HighlightBlink(e.DOM, count, style)
+	e.Bot.ScrollToElemDirectly(e.DOM)
+	e.Bot.HighlightBlink(e.DOM, count, style)
 }

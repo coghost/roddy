@@ -106,14 +106,27 @@ func (c *Collector) Visit(URL string) error {
 	return c.scrape(URL, 1, nil)
 }
 
-func (c *Collector) scrape(u string, depth int, ctx *Context) error {
+func (c *Collector) getParsedURL(u string, depth int) (*url.URL, error) {
+	if u == BlankPagePlaceholder {
+		return nil, nil
+	}
+
 	parsedURL, err := ParseUrl(u)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	if err := c.requestCheck(parsedURL, depth); err != nil {
 		err = c.handleIgnoredErrors(err)
+		return nil, err
+	}
+
+	return parsedURL, nil
+}
+
+func (c *Collector) scrape(u string, depth int, ctx *Context) error {
+	parsedURL, err := c.getParsedURL(u, depth)
+	if err != nil {
 		return err
 	}
 
@@ -176,15 +189,26 @@ func (c *Collector) fetch(URL *url.URL, depth int, ctx *Context) error {
 		return nil
 	}
 
-	log.Debug().Str("request", request.String()).Msg("visiting")
-
-	if err := page.Timeout(xbot.MediumToSec * time.Second).Navigate(URL.String()); err != nil {
-		return c.handleOnError(nil, err, request, ctx)
+	if URL != nil {
+		log.Debug().Str("request", request.String()).Msg("visiting")
+		if err := page.Timeout(xbot.MediumToSec * time.Second).Navigate(URL.String()); err != nil {
+			log.Error().Err(err).Str("url", URL.String()).Msg("cannot visit")
+			return c.handleOnError(nil, err, request, ctx)
+		}
 	}
 
 	err := page.Timeout(xbot.MediumToSec * time.Second).WaitLoad()
 	if err != nil {
 		return c.handleOnError(nil, err, request, ctx)
+	}
+
+	if URL == nil {
+		URL, err = c.getParsedURL(page.MustInfo().URL, depth)
+		if err != nil {
+			return err
+		}
+
+		request.URL = URL
 	}
 
 	response := &Response{
@@ -202,6 +226,11 @@ func (c *Collector) fetch(URL *url.URL, depth int, ctx *Context) error {
 	}
 
 	err = c.handleOnData(response)
+	if err != nil {
+		return c.handleOnError(response, err, request, ctx)
+	}
+
+	err = c.handleOnPaging(response)
 	if err != nil {
 		return c.handleOnError(response, err, request, ctx)
 	}
@@ -397,6 +426,25 @@ func (c *Collector) OnData(selector string, f DataCallback) {
 	c.lock.Unlock()
 }
 
+func (c *Collector) OnPaging(selector string, f HTMLCallback, opts ...CallbackOptionFunc) {
+	c.lock.Lock()
+
+	opt := CallbackOptions{deferFunc: func(p *rod.Page) {}}
+	bindCallbackOptions(&opt, opts...)
+
+	if c.pagingCallbacks == nil {
+		c.pagingCallbacks = make([]*htmlCallbackContainer, 0, _capacity)
+	}
+
+	c.pagingCallbacks = append(c.pagingCallbacks, &htmlCallbackContainer{
+		Selector:  selector,
+		Function:  f,
+		DeferFunc: opt.deferFunc,
+	})
+
+	c.lock.Unlock()
+}
+
 // OnError registers a function. Function will be executed if an error
 // occurs during the HTTP request.
 func (c *Collector) OnError(f ErrorCallback) {
@@ -474,31 +522,35 @@ func (c *Collector) handleOnData(resp *Response) error {
 }
 
 func (c *Collector) handleOnHTML(resp *Response) error {
-	if len(c.htmlCallbacks) == 0 {
+	return c.handleOnSerp(resp, c.htmlCallbacks)
+}
+
+func (c *Collector) handleOnPaging(resp *Response) error {
+	return c.handleOnSerp(resp, c.pagingCallbacks)
+}
+
+func (c *Collector) handleOnSerp(resp *Response, callbacks []*htmlCallbackContainer) error {
+	if len(callbacks) == 0 {
 		return nil
 	}
 
 	finalDepth := resp.Request.Depth >= c.maxDepth
 	request := resp.Request
 
-	for cbIndex, cb := range c.htmlCallbacks {
+	for cbIndex, cb := range callbacks {
 		// after current page's elements are handled, go back
 		if cb.DeferFunc != nil {
 			defer cb.DeferFunc(resp.Page)
 		}
 
-		pg := resp.Page
-		// count := len(pg.MustElements(cb.Selector))
+		bot := xbot.NewBotWithPage(resp.Page)
 
-		elems, err := pg.Elements(cb.Selector)
-		if err != nil {
-			return err
+		elem := bot.GetElem(cb.Selector)
+		if elem == nil {
+			return fmt.Errorf("%s: %s: %w", request.String(), cb.Selector, ErrNoElemFound)
 		}
 
-		count := len(elems)
-		if count == 0 {
-			return fmt.Errorf("%s: %w", request.String(), ErrNoElemFound)
-		}
+		count := len(bot.GetElems(cb.Selector))
 
 		// this will skip page with depth of maxDepth
 		if c.skipOnHTMLOfMaxDepth && finalDepth {
@@ -510,11 +562,13 @@ func (c *Collector) handleOnHTML(resp *Response) error {
 
 		for i := 0; i < count; i++ {
 			// WARN: elems are not accessable after page is changed, we have to re-get all elements, then get correct elem by index.
-			elems, err := pg.Elements(cb.Selector)
-			if err != nil || len(elems) == 0 {
-				c.MustGoBack(pg)
+			elem := bot.GetElem(cb.Selector)
+			if elem == nil {
+				c.MustGoBack(bot.Pg)
 				continue
 			}
+
+			elems := bot.GetElems(cb.Selector)
 
 			if i >= len(elems) {
 				// elems may changed while we re-get all elements.

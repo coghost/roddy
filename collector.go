@@ -60,6 +60,7 @@ type Collector struct {
 
 	dataCallbacks     []*dataCallbackContainer
 	htmlCallbacks     []*htmlCallbackContainer
+	pagingCallbacks   []*htmlCallbackContainer
 	requestCallbacks  []RequestCallback
 	responseCallbacks []ResponseCallback
 	errorCallbacks    []ErrorCallback

@@ -16,10 +16,11 @@ type ErrorCallback func(*Response, error)
 // HTMLCallback is a type alias for OnHTML callback functions
 type HTMLCallback func(e *SerpElement)
 
+// DataCallback is where we handle all data wanted
+type DataCallback func(e *DataElement)
+
 // ScrapedCallback is a type alias for OnScraped callback functions
 type ScrapedCallback func(*Response)
-
-type DataCallback func(e *DataElement)
 
 type htmlCallbackContainer struct {
 	Selector string

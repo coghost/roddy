@@ -12,6 +12,10 @@ import (
 	whatwgUrl "github.com/nlnwa/whatwg-url/url"
 )
 
+const (
+	BlankPagePlaceholder = "data;"
+)
+
 type Request struct {
 	// ID is the Unique identifier of the request
 	ID uint32
@@ -88,7 +92,7 @@ func (r *Request) String() string {
 }
 
 func (r *Request) Visit(URL string) error {
-	return r.collector.scrape(r.AbsoluteURL(URL), r.Depth+1, r.Ctx)
+	return r.collector.scrape(URL, r.Depth+1, r.Ctx)
 }
 
 func (r *Request) Do() error {
