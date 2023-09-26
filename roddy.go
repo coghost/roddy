@@ -50,6 +50,7 @@ func (c *Collector) Init() {
 	c.cookieDir = c.baseDir + "/cookies"
 	c.cacheDir = c.baseDir + "/cache"
 
+	c.wg = &sync.WaitGroup{}
 	c.lock = &sync.RWMutex{}
 	c.ctx = context.Background()
 }
@@ -62,6 +63,20 @@ func (c *Collector) registerCtrlC() {
 		<-ch
 		os.Exit(1)
 	}()
+}
+
+// String is the text representation of the collector.
+// It contains useful debug information about the collector's internals
+func (c *Collector) String() string {
+	return fmt.Sprintf(
+		"Requests made: %d (%d responses) | Callbacks: OnRequest: %d, OnHTML: %d, OnResponse: %d, OnError: %d",
+		atomic.LoadUint32(&c.requestCount),
+		atomic.LoadUint32(&c.responseCount),
+		len(c.requestCallbacks),
+		len(c.dataCallbacks),
+		len(c.responseCallbacks),
+		len(c.errorCallbacks),
+	)
 }
 
 // Wait returns when the collector jobs are finished
@@ -131,7 +146,7 @@ func (c *Collector) scrape(u string, depth int, ctx *Context) error {
 	}
 
 	if c.async {
-		c.wg.Add()
+		c.wg.Add(1)
 		return c.asyncFetch(parsedURL, depth, ctx)
 	}
 
@@ -142,6 +157,14 @@ func (c *Collector) asyncFetch(parsedURL *url.URL, depth int, ctx *Context) erro
 	errChan := make(chan error, 1)
 
 	go func() {
+		defer c.wg.Done()
+
+		c.waitChan <- true
+		defer func(c *Collector) {
+			c.randomSleep()
+			<-c.waitChan
+		}(c)
+
 		err := c.fetch(parsedURL, depth, ctx)
 		err = c.handleIgnoredErrors(err)
 
@@ -160,11 +183,6 @@ func (c *Collector) asyncFetch(parsedURL *url.URL, depth int, ctx *Context) erro
 }
 
 func (c *Collector) fetch(URL *url.URL, depth int, ctx *Context) error {
-	if c.async {
-		defer c.wg.Done()
-	}
-	defer c.randomSleep()
-
 	bot, page := c.createPage()
 
 	if ctx == nil {
@@ -189,35 +207,15 @@ func (c *Collector) fetch(URL *url.URL, depth int, ctx *Context) error {
 		return nil
 	}
 
-	if URL != nil {
-		log.Debug().Str("request", request.String()).Msg("visiting")
-		if err := page.Timeout(xbot.MediumToSec * time.Second).Navigate(URL.String()); err != nil {
-			log.Error().Err(err).Str("url", URL.String()).Msg("cannot visit")
-			return c.handleOnError(nil, err, request, ctx)
-		}
-	}
-
-	err := page.Timeout(xbot.MediumToSec * time.Second).WaitLoad()
+	response, err := c.MustGet(request, page, URL, depth)
 	if err != nil {
 		return c.handleOnError(nil, err, request, ctx)
 	}
 
-	if URL == nil {
-		URL, err = c.getParsedURL(page.MustInfo().URL, depth)
-		if err != nil {
-			return err
-		}
+	atomic.AddUint32(&c.responseCount, 1)
 
-		request.URL = URL
-	}
+	response.Ctx = ctx
 
-	response := &Response{
-		Page:    page,
-		Request: request,
-		Ctx:     ctx,
-	}
-
-	c.responseCount++
 	c.handleOnResponse(response)
 
 	err = c.handleOnHTML(response)
@@ -228,6 +226,16 @@ func (c *Collector) fetch(URL *url.URL, depth int, ctx *Context) error {
 	err = c.handleOnData(response)
 	if err != nil {
 		return c.handleOnError(response, err, request, ctx)
+	}
+
+	if c.maxResponses > 0 && c.responseCount >= c.maxResponses {
+		return ErrMaxResponses
+	}
+
+	err = c.handleMaxPageNum()
+	if err != nil {
+		log.Error().Err(err).Msg("checking page num got error")
+		return err
 	}
 
 	err = c.handleOnPaging(response)
@@ -511,7 +519,7 @@ func (c *Collector) handleOnData(resp *Response) error {
 
 		doc.Find(cb.Selector).Each(func(_ int, s *goquery.Selection) {
 			for _, n := range s.Nodes {
-				e := NewHTMLElement(s, n, cbIndex)
+				e := NewHTMLElement(resp, s, n, cbIndex)
 				cbIndex++
 				cb.Function(e)
 			}

@@ -90,7 +90,20 @@ func (e *SerpElement) UpdateText(selector string, text string) (string, error) {
 }
 
 func (e *SerpElement) Click(selector string) error {
+	e.Bot.GetElem(selector, xbot.WithRoot(e.root))
+
 	err := e.Bot.ScrollAndClick(selector, xbot.WithRoot(e.root))
+	if err != nil {
+		pp.Println(err)
+	}
+
+	return err
+}
+
+func (e *SerpElement) ClickAtIndex(selector string, index int) error {
+	elem := e.Bot.GetElem(selector, xbot.WithRoot(e.root), xbot.ElemIndex(index))
+
+	err := e.Bot.ClickElem(elem)
 	if err != nil {
 		pp.Println(err)
 	}

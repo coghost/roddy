@@ -1,15 +1,21 @@
 package roddy
 
 import (
+	"net/url"
 	"path"
+	"time"
 
 	"github.com/coghost/xbot"
 	"github.com/coghost/xutil"
 	"github.com/go-rod/rod"
 	"github.com/gookit/goutil/arrutil"
-	"github.com/remeh/sizedwaitgroup"
 	"github.com/rs/zerolog/log"
 )
+
+/*
+overview level:
+
+*/
 
 const (
 	_leftStep = 100
@@ -20,6 +26,35 @@ var (
 	_left = -2560
 	_top  = -300
 )
+
+func (c *Collector) MustGet(request *Request, page *rod.Page, URL *url.URL, depth int) (*Response, error) {
+	if URL != nil {
+		log.Debug().Str("request", request.String()).Msg("visiting")
+		if err := page.Timeout(xbot.MediumToSec * time.Second).Navigate(URL.String()); err != nil {
+			log.Error().Err(err).Str("url", URL.String()).Msg("cannot visit")
+			return nil, err
+		}
+	}
+
+	err := page.Timeout(xbot.MediumToSec * time.Second).WaitLoad()
+	if err != nil {
+		return nil, err
+	}
+
+	if URL == nil {
+		URL, err = c.getParsedURL(page.MustInfo().URL, depth)
+		if err != nil {
+			return nil, err
+		}
+
+		request.URL = URL
+	}
+
+	return &Response{
+		Request: request,
+		Page:    page,
+	}, nil
+}
 
 func (c *Collector) MustGoBack(page *rod.Page) {
 	if c.maxDepth == 0 {
@@ -65,9 +100,17 @@ func (c *Collector) initBotPagePool() {
 	c.botPool = NewBotPoolManager(c.parallelism)
 	c.pagePool = rod.NewPagePool(c.parallelism)
 
-	if c.async {
-		c.wg = sizedwaitgroup.New(c.parallelism)
-	}
+	c.waitChan = make(chan bool, c.parallelism)
+}
+
+func (c *Collector) ClearBot() {
+	bot := c.botPool.Get(func() *xbot.Bot {
+		bot := c.newBot()
+		xbot.SpawnBrowserOnly(bot)
+		return bot
+	})
+
+	bot.Close()
 }
 
 func (c *Collector) createPage() (*xbot.Bot, *rod.Page) {
@@ -118,6 +161,7 @@ func (c *Collector) newBot() *xbot.Bot {
 		xbot.BotUserAgent(c.userAgent),
 		xbot.BotProxyServer(proxy),
 		xbot.WithBotConfig(bc),
+		xbot.BotHighlight(false),
 	}
 
 	_left += _leftStep

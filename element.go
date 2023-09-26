@@ -12,16 +12,24 @@ type DataElement struct {
 	TagName string
 	Index   int
 
+	// Request is the request object of the element's HTML document
+	Request *Request
+	// Response is the Response object of the element's HTML document
+	Response *Response
+
 	// DOM is the goquery parsed DOM object of the page. DOM is relative
 	// to the current HTMLElement
 	DOM  *goquery.Selection
 	node *html.Node
 }
 
-func NewHTMLElement(s *goquery.Selection, n *html.Node, index int) *DataElement {
+func NewHTMLElement(resp *Response, s *goquery.Selection, n *html.Node, index int) *DataElement {
 	return &DataElement{
 		TagName: n.Data,
 		Index:   index,
+
+		Request:  resp.Request,
+		Response: resp,
 
 		DOM:  s,
 		node: n,

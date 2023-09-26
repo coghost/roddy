@@ -12,7 +12,6 @@ import (
 	"roddy/storage"
 
 	"github.com/go-rod/rod"
-	"github.com/remeh/sizedwaitgroup"
 )
 
 type Collector struct {
@@ -34,6 +33,12 @@ type Collector struct {
 	// maxRequests limit the number of requests done by the instance.
 	// Set it to 0 for infinite requests (default).
 	maxRequests uint32
+
+	// maxResponses limit the number of responses got by the instance.
+	maxResponses uint32
+
+	// maxPageNum limit the max page number
+	maxPageNum uint32
 
 	// skipOnHTMLOfMaxDepth
 	skipOnHTMLOfMaxDepth bool
@@ -71,6 +76,7 @@ type Collector struct {
 
 	requestCount  uint32
 	responseCount uint32
+	pageNum       uint32
 
 	// highlightCount by default(0) is disabled.
 	highlightCount int
@@ -80,7 +86,9 @@ type Collector struct {
 
 	async bool
 
-	wg sizedwaitgroup.SizedWaitGroup
+	wg *sync.WaitGroup
+
+	waitChan chan bool
 
 	// delay is the basic delay before create a new request
 	delay time.Duration
@@ -137,6 +145,10 @@ var (
 	ErrNoURLFiltersMatch = errors.New("No URLFilters match")
 	// ErrMaxRequests is the error returned when exceeding max requests
 	ErrMaxRequests = errors.New("Max Requests limit reached")
+	// ErrMaxResponses is the error returned when exceeding max response
+	ErrMaxResponses = errors.New("Max Responses limit reached")
+
+	ErrMaxPageNumReached = errors.New("Max PageNum limit reached")
 
 	// ErrNoElemFound is the error for no element is found for given selector
 	ErrNoElemFound = errors.New("No element found")
@@ -202,9 +214,21 @@ func MaxDepth(depth int) CollectorOption {
 
 // MaxRequests limit the number of requests done by the instance.
 // Set it to 0 for infinite requests (default).
-func MaxRequests(max uint32) CollectorOption {
+func MaxRequests(n uint32) CollectorOption {
 	return func(c *Collector) {
-		c.maxRequests = max
+		c.maxRequests = n
+	}
+}
+
+func MaxResponse(n uint32) CollectorOption {
+	return func(c *Collector) {
+		c.maxResponses = n
+	}
+}
+
+func MaxPageNum(n uint32) CollectorOption {
+	return func(c *Collector) {
+		c.maxPageNum = n
 	}
 }
 
