@@ -16,11 +16,11 @@ func main() {
 
 	xlog.InitLogForConsole()
 
-	c.OnHTML("a[href]", func(e *roddy.SerpElement) {
+	c.OnHTML("a[href]", func(e *roddy.SerpElement) error {
 		link := e.Attr("href")
 		fmt.Printf("from %s, found: %q -> %s\n", e.Request.String(), e.Text(), link)
 
-		c.Visit(e.Request.AbsoluteURL(link))
+		return c.Visit(e.Request.AbsoluteURL(link))
 	})
 
 	c.OnRequest(func(r *roddy.Request) {

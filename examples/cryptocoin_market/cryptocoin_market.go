@@ -32,10 +32,11 @@ func main() {
 	c := roddy.NewCollector()
 	home := "https://coinmarketcap.com/all/views/all/"
 
-	c.OnHTML(`html>body.DAY`, func(e *roddy.SerpElement) {
+	c.OnHTML(`html>body.DAY`, func(e *roddy.SerpElement) error {
 		// please beware of `html>body.DAY`, this selector finds and only finds one element.
 		// by default, only partial records are loaded, so scroll until load more is clickable.
 		e.ScrollUntilElemInteractable(`div.cmc-table-listing__loadmore>button`, 64)
+		return nil
 	})
 
 	id := 0

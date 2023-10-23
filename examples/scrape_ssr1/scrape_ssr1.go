@@ -24,10 +24,10 @@ func main() {
 		)
 	})
 
-	c.OnPaging(`a.next`, func(e *roddy.SerpElement) {
+	c.OnPaging(`a.next`, func(e *roddy.SerpElement) error {
 		e.Bot.GetElem(`div.item`)
 		e.Click(e.Selector)
-		e.Request.Visit(roddy.BlankPagePlaceholder)
+		return e.Request.Visit(roddy.BlankPagePlaceholder)
 	})
 
 	c.OnError(func(r *roddy.Response, err error) {

@@ -14,7 +14,7 @@ type ResponseCallback func(*Response)
 type ErrorCallback func(*Response, error)
 
 // HTMLCallback is a type alias for OnHTML callback functions
-type HTMLCallback func(e *SerpElement)
+type HTMLCallback func(e *SerpElement) error
 
 // DataCallback is where we handle all data wanted
 type DataCallback func(e *DataElement)

@@ -14,8 +14,9 @@ func main() {
 	c := roddy.NewCollector()
 	defer c.QuitOnTimeout()
 
-	c.OnHTML("*", func(e *roddy.SerpElement) {
+	c.OnHTML("*", func(e *roddy.SerpElement) error {
 		fmt.Println(e)
+		return nil
 	})
 
 	c.OnError(func(r *roddy.Response, err error) {

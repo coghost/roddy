@@ -234,7 +234,6 @@ func (c *Collector) fetch(URL *url.URL, depth int, ctx *Context) error {
 
 	err = c.handleMaxPageNum()
 	if err != nil {
-		log.Error().Err(err).Msg("checking page num got error")
 		return err
 	}
 
@@ -417,6 +416,8 @@ func (c *Collector) OnHTMLDetach(goquerySelector string) {
 
 	if deleteIdx != -1 {
 		c.htmlCallbacks = append(c.htmlCallbacks[:deleteIdx], c.htmlCallbacks[deleteIdx+1:]...)
+
+		log.Info().Str("selector", goquerySelector).Msg("detached handler on")
 	}
 }
 
@@ -606,7 +607,11 @@ func (c *Collector) handleOnSerp(resp *Response, callbacks []*htmlCallbackContai
 			}
 
 			log.Trace().Str("with", target).Str("from", parent).Msg(msg)
-			cb.Function(e)
+
+			err := cb.Function(e)
+			if err != nil {
+				return err
+			}
 		}
 	}
 

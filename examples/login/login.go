@@ -15,16 +15,20 @@ func login2scrape() {
 
 	xlog.InitLogForConsole()
 
-	c.OnHTML("form.el-form", func(e *roddy.SerpElement) {
+	c.OnHTML("form.el-form", func(e *roddy.SerpElement) error {
 		e.MarkElemAsRoot()
 
 		e.UpdateText(`input[type="text"]`, "admin")
 		e.UpdateText(`input[type="password"]`, "admin")
 		e.Click(`button[type="button"]`)
+
+		return nil
 	})
 
-	c.OnHTML(`div.el-message--success`, func(e *roddy.SerpElement) {
+	c.OnHTML(`div.el-message--success`, func(e *roddy.SerpElement) error {
 		fmt.Println(e.Text())
+
+		return nil
 	})
 
 	c.Visit("https://login3.scrape.center/login")
@@ -36,7 +40,7 @@ func login2spiderbuf() {
 
 	xlog.InitLogForConsole(xlog.WithLevel(1))
 
-	c.OnHTML("form.form-horizontal", func(e *roddy.SerpElement) {
+	c.OnHTML("form.form-horizontal", func(e *roddy.SerpElement) error {
 		e.MarkElemAsRoot()
 
 		e.UpdateText(`input#username`, "admin")
@@ -44,10 +48,12 @@ func login2spiderbuf() {
 		e.Click(`button.btn`)
 
 		e.ResetRoot()
+		return nil
 	})
 
-	c.OnHTML("table.table>tbody>tr", func(e *roddy.SerpElement) {
+	c.OnHTML("table.table>tbody>tr", func(e *roddy.SerpElement) error {
 		fmt.Println(e.Text())
+		return nil
 	})
 
 	c.Visit("http://www.spiderbuf.cn/e01/")

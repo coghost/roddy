@@ -31,12 +31,14 @@ func handler(w http.ResponseWriter, r *http.Request) {
 
 	p := &pageInfo{Links: make(map[string]int)}
 
-	c.OnHTML("a[href]", func(e *roddy.SerpElement) {
+	c.OnHTML("a[href]", func(e *roddy.SerpElement) error {
 		link := e.Request.AbsoluteURL(e.Link())
 		if link != "" {
 			p.Links[link]++
 			p.Total++
 		}
+
+		return nil
 	})
 
 	c.OnResponse(func(r *roddy.Response) {

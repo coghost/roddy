@@ -7,8 +7,6 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"github.com/rs/zerolog/log"
-
 	"github.com/coghost/xbot"
 	"github.com/go-rod/rod"
 	whatwgUrl "github.com/nlnwa/whatwg-url/url"
@@ -98,13 +96,7 @@ func (r *Request) Visit(URL string) error {
 }
 
 func (r *Request) VisitByMockClick() error {
-	err := r.collector.scrape(BlankPagePlaceholder, r.Depth, r.Ctx)
-	if err != nil {
-		r.abort = true
-		log.Error().Err(err).Msg("cannot do visit by mock click")
-	}
-
-	return err
+	return r.collector.scrape(BlankPagePlaceholder, r.Depth, r.Ctx)
 }
 
 func (r *Request) Do() error {

@@ -30,9 +30,10 @@ func main() {
 
 	defer c.QuitOnTimeout()
 
-	c.OnHTML("html>body", func(e *roddy.SerpElement) {
+	c.OnHTML("html>body", func(e *roddy.SerpElement) error {
 		txt := strings.Split(e.Text(), "\n")[0]
 		fmt.Println("[from]", e.Request.IDString(), "[got]", txt)
+		return nil
 	})
 
 	c.OnRequest(func(r *roddy.Request) {

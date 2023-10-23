@@ -49,10 +49,10 @@ func runWithQueue() {
 		stories = append(stories, story)
 	})
 
-	c.OnPaging(`span.next-button>a`, func(e *roddy.SerpElement) {
+	c.OnPaging(`span.next-button>a`, func(e *roddy.SerpElement) error {
 		fmt.Println("got", len(stories), e.Link())
 		// e.Click(e.Selector)
-		e.Request.Visit(e.Link())
+		return e.Request.Visit(e.Link())
 	})
 
 	const base = "https://old.reddit.com/r/%s/"
@@ -91,10 +91,10 @@ func runAsync() {
 		stories = append(stories, story)
 	})
 
-	c.OnPaging(`span.next-button`, func(e *roddy.SerpElement) {
+	c.OnPaging(`span.next-button`, func(e *roddy.SerpElement) error {
 		fmt.Println("got", len(stories), e.Request.String())
 		e.Click(e.Selector)
-		e.Request.VisitByMockClick()
+		return e.Request.VisitByMockClick()
 	})
 
 	c.OnError(func(r *roddy.Response, err error) {

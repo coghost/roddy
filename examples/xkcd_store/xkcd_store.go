@@ -41,8 +41,8 @@ func main() {
 		})
 	})
 
-	c.OnPaging(`.next a[href]`, func(e *roddy.SerpElement) {
-		e.Request.Visit(e.Link())
+	c.OnPaging(`.next a[href]`, func(e *roddy.SerpElement) error {
+		return e.Request.Visit(e.Link())
 	})
 
 	c.Visit("https://store.xkcd.com/collections/everything")
