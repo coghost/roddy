@@ -26,8 +26,9 @@ func main() {
 
 	xlog.InitLogForConsole()
 
-	c.OnHTML("body", func(e *roddy.HTMLElement) {
+	c.OnHTML("body", func(e *roddy.SerpElement) error {
 		fmt.Println(e.Text())
+		return nil
 	})
 
 	c.Visit("http://ip.42.pl/short")

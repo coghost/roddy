@@ -1,6 +1,7 @@
 package roddy
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -16,6 +17,7 @@ import (
 
 	"roddy/storage"
 
+	"github.com/PuerkitoBio/goquery"
 	"github.com/coghost/xbot"
 	"github.com/coghost/xutil"
 	"github.com/go-rod/rod"
@@ -48,6 +50,7 @@ func (c *Collector) Init() {
 	c.cookieDir = c.baseDir + "/cookies"
 	c.cacheDir = c.baseDir + "/cache"
 
+	c.wg = &sync.WaitGroup{}
 	c.lock = &sync.RWMutex{}
 	c.ctx = context.Background()
 }
@@ -60,6 +63,20 @@ func (c *Collector) registerCtrlC() {
 		<-ch
 		os.Exit(1)
 	}()
+}
+
+// String is the text representation of the collector.
+// It contains useful debug information about the collector's internals
+func (c *Collector) String() string {
+	return fmt.Sprintf(
+		"Requests made: %d (%d responses) | Callbacks: OnRequest: %d, OnHTML: %d, OnResponse: %d, OnError: %d",
+		atomic.LoadUint32(&c.requestCount),
+		atomic.LoadUint32(&c.responseCount),
+		len(c.requestCallbacks),
+		len(c.dataCallbacks),
+		len(c.responseCallbacks),
+		len(c.errorCallbacks),
+	)
 }
 
 // Wait returns when the collector jobs are finished
@@ -104,19 +121,32 @@ func (c *Collector) Visit(URL string) error {
 	return c.scrape(URL, 1, nil)
 }
 
-func (c *Collector) scrape(u string, depth int, ctx *Context) error {
+func (c *Collector) getParsedURL(u string, depth int) (*url.URL, error) {
+	if u == BlankPagePlaceholder {
+		return nil, nil
+	}
+
 	parsedURL, err := ParseUrl(u)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	if err := c.requestCheck(parsedURL, depth); err != nil {
 		err = c.handleIgnoredErrors(err)
+		return nil, err
+	}
+
+	return parsedURL, nil
+}
+
+func (c *Collector) scrape(u string, depth int, ctx *Context) error {
+	parsedURL, err := c.getParsedURL(u, depth)
+	if err != nil {
 		return err
 	}
 
 	if c.async {
-		c.wg.Add()
+		c.wg.Add(1)
 		return c.asyncFetch(parsedURL, depth, ctx)
 	}
 
@@ -127,6 +157,14 @@ func (c *Collector) asyncFetch(parsedURL *url.URL, depth int, ctx *Context) erro
 	errChan := make(chan error, 1)
 
 	go func() {
+		defer c.wg.Done()
+
+		c.waitChan <- true
+		defer func(c *Collector) {
+			c.randomSleep()
+			<-c.waitChan
+		}(c)
+
 		err := c.fetch(parsedURL, depth, ctx)
 		err = c.handleIgnoredErrors(err)
 
@@ -145,11 +183,6 @@ func (c *Collector) asyncFetch(parsedURL *url.URL, depth int, ctx *Context) erro
 }
 
 func (c *Collector) fetch(URL *url.URL, depth int, ctx *Context) error {
-	if c.async {
-		defer c.wg.Done()
-	}
-	defer c.randomSleep()
-
 	bot, page := c.createPage()
 
 	if ctx == nil {
@@ -174,32 +207,37 @@ func (c *Collector) fetch(URL *url.URL, depth int, ctx *Context) error {
 		return nil
 	}
 
-	log.Debug().Str("request", request.String()).Msg("visiting")
-
-	if err := page.Timeout(xbot.MediumToSec * time.Second).Navigate(URL.String()); err != nil {
-		return c.handleOnError(nil, err, request, ctx)
-	}
-
-	err := page.Timeout(xbot.MediumToSec * time.Second).WaitLoad()
+	response, err := c.MustGet(request, page, URL, depth)
 	if err != nil {
 		return c.handleOnError(nil, err, request, ctx)
 	}
 
-	response := &Response{
-		Page:    page,
-		Request: request,
-		Ctx:     ctx,
-	}
+	atomic.AddUint32(&c.responseCount, 1)
 
-	c.responseCount++
+	response.Ctx = ctx
+
 	c.handleOnResponse(response)
 
-	err = c.handleOnSerp(bot, response)
+	err = c.handleOnHTML(response)
 	if err != nil {
 		return c.handleOnError(response, err, request, ctx)
 	}
 
-	err = c.handleOnHTML(response)
+	err = c.handleOnData(response)
+	if err != nil {
+		return c.handleOnError(response, err, request, ctx)
+	}
+
+	if c.maxResponses > 0 && c.responseCount >= c.maxResponses {
+		return ErrMaxResponses
+	}
+
+	err = c.handleMaxPageNum()
+	if err != nil {
+		return err
+	}
+
+	err = c.handleOnPaging(response)
 	if err != nil {
 		return c.handleOnError(response, err, request, ctx)
 	}
@@ -311,9 +349,10 @@ func (c *Collector) handleIgnoredErrors(err error) error {
 /**
 - OnRequest
 - OnResponse
-- OnSerp
 - OnHTML
+- OnSerp
 - OnScraped
+
 - OnError
 **/
 
@@ -326,39 +365,6 @@ func (c *Collector) OnRequest(f RequestCallback) {
 	}
 
 	c.requestCallbacks = append(c.requestCallbacks, f)
-	c.lock.Unlock()
-}
-
-func (c *Collector) OnSerp(selector string, f SerpCallback) {
-	c.lock.Lock()
-
-	if c.serpCallbacks == nil {
-		c.serpCallbacks = make([]*serpCallbackContainer, 0, _capacity)
-	}
-
-	c.serpCallbacks = append(c.serpCallbacks, &serpCallbackContainer{
-		Selector: selector,
-		Function: f,
-	})
-	c.lock.Unlock()
-}
-
-func (c *Collector) OnHTML(selector string, f HTMLCallback, opts ...OnHTMLOptionFunc) {
-	c.lock.Lock()
-
-	opt := OnHTMLOptions{deferFunc: func(p *rod.Page) {}}
-	bindOnHTMLOptions(&opt, opts...)
-
-	if c.htmlCallbacks == nil {
-		c.htmlCallbacks = make([]*htmlCallbackContainer, 0, _capacity)
-	}
-
-	c.htmlCallbacks = append(c.htmlCallbacks, &htmlCallbackContainer{
-		Selector:  selector,
-		Function:  f,
-		DeferFunc: opt.deferFunc,
-	})
-
 	c.lock.Unlock()
 }
 
@@ -375,16 +381,21 @@ func (c *Collector) OnResponse(f ResponseCallback) {
 	c.lock.Unlock()
 }
 
-// OnError registers a function. Function will be executed if an error
-// occurs during the HTTP request.
-func (c *Collector) OnError(f ErrorCallback) {
+func (c *Collector) OnHTML(selector string, f HTMLCallback, opts ...CallbackOptionFunc) {
 	c.lock.Lock()
 
-	if c.errorCallbacks == nil {
-		c.errorCallbacks = make([]ErrorCallback, 0, _capacity)
+	opt := CallbackOptions{deferFunc: func(p *rod.Page) {}}
+	bindCallbackOptions(&opt, opts...)
+
+	if c.htmlCallbacks == nil {
+		c.htmlCallbacks = make([]*htmlCallbackContainer, 0, _capacity)
 	}
 
-	c.errorCallbacks = append(c.errorCallbacks, f)
+	c.htmlCallbacks = append(c.htmlCallbacks, &htmlCallbackContainer{
+		Selector:  selector,
+		Function:  f,
+		DeferFunc: opt.deferFunc,
+	})
 
 	c.lock.Unlock()
 }
@@ -405,7 +416,56 @@ func (c *Collector) OnHTMLDetach(goquerySelector string) {
 
 	if deleteIdx != -1 {
 		c.htmlCallbacks = append(c.htmlCallbacks[:deleteIdx], c.htmlCallbacks[deleteIdx+1:]...)
+
+		log.Info().Str("selector", goquerySelector).Msg("detached handler on")
 	}
+}
+
+func (c *Collector) OnData(selector string, f DataCallback) {
+	c.lock.Lock()
+
+	if c.dataCallbacks == nil {
+		c.dataCallbacks = make([]*dataCallbackContainer, 0, _capacity)
+	}
+
+	c.dataCallbacks = append(c.dataCallbacks, &dataCallbackContainer{
+		Selector: selector,
+		Function: f,
+	})
+	c.lock.Unlock()
+}
+
+func (c *Collector) OnPaging(selector string, f HTMLCallback, opts ...CallbackOptionFunc) {
+	c.lock.Lock()
+
+	opt := CallbackOptions{deferFunc: func(p *rod.Page) {}}
+	bindCallbackOptions(&opt, opts...)
+
+	if c.pagingCallbacks == nil {
+		c.pagingCallbacks = make([]*htmlCallbackContainer, 0, _capacity)
+	}
+
+	c.pagingCallbacks = append(c.pagingCallbacks, &htmlCallbackContainer{
+		Selector:  selector,
+		Function:  f,
+		DeferFunc: opt.deferFunc,
+	})
+
+	c.lock.Unlock()
+}
+
+// OnError registers a function. Function will be executed if an error
+// occurs during the HTTP request.
+func (c *Collector) OnError(f ErrorCallback) {
+	c.lock.Lock()
+
+	if c.errorCallbacks == nil {
+		c.errorCallbacks = make([]ErrorCallback, 0, _capacity)
+	}
+
+	c.errorCallbacks = append(c.errorCallbacks, f)
+
+	c.lock.Unlock()
 }
 
 // OnScraped registers a function. Function will be executed after
@@ -434,55 +494,72 @@ func (c *Collector) handleOnResponse(r *Response) {
 	}
 }
 
-func (c *Collector) handleOnSerp(bot *xbot.Bot, resp *Response) error {
-	if len(c.serpCallbacks) == 0 {
+func (c *Collector) handleOnData(resp *Response) error {
+	if len(c.dataCallbacks) == 0 {
 		return nil
 	}
 
-	for cbIndex, cb := range c.serpCallbacks {
-		pg := resp.Page
+	doc, err := goquery.NewDocumentFromReader(bytes.NewBuffer([]byte(resp.Page.MustHTML())))
+	if err != nil {
+		return err
+	}
 
-		elem, err := pg.Element(cb.Selector)
-		if err != nil {
-			continue
+	// try parse base from
+	if href, found := doc.Find("base[href]").Attr("href"); found {
+		u, err := urlParser.ParseRef(resp.Request.URL.String(), href)
+		if err == nil {
+			baseURL, err := url.Parse(u.Href(false))
+			if err == nil {
+				resp.Request.baseURL = baseURL
+			}
 		}
+	}
 
-		bot.BindRoot(elem)
-		defer bot.ResetRoot()
+	for _, cb := range c.dataCallbacks {
+		cbIndex := 0
 
-		e := NewSerpElement(resp, elem, cb.Selector, cbIndex)
-		cb.Function(e)
+		doc.Find(cb.Selector).Each(func(_ int, s *goquery.Selection) {
+			for _, n := range s.Nodes {
+				e := NewHTMLElement(resp, s, n, cbIndex)
+				cbIndex++
+				cb.Function(e)
+			}
+		})
 	}
 
 	return nil
 }
 
 func (c *Collector) handleOnHTML(resp *Response) error {
-	if len(c.htmlCallbacks) == 0 {
+	return c.handleOnSerp(resp, c.htmlCallbacks)
+}
+
+func (c *Collector) handleOnPaging(resp *Response) error {
+	return c.handleOnSerp(resp, c.pagingCallbacks)
+}
+
+func (c *Collector) handleOnSerp(resp *Response, callbacks []*htmlCallbackContainer) error {
+	if len(callbacks) == 0 {
 		return nil
 	}
 
 	finalDepth := resp.Request.Depth >= c.maxDepth
 	request := resp.Request
 
-	for cbIndex, cb := range c.htmlCallbacks {
+	for cbIndex, cb := range callbacks {
 		// after current page's elements are handled, go back
 		if cb.DeferFunc != nil {
 			defer cb.DeferFunc(resp.Page)
 		}
 
-		pg := resp.Page
-		// count := len(pg.MustElements(cb.Selector))
+		bot := xbot.NewBotWithPage(resp.Page)
 
-		elems, err := pg.Elements(cb.Selector)
-		if err != nil {
-			return err
+		elem := bot.GetElem(cb.Selector)
+		if elem == nil {
+			return fmt.Errorf("%s: %s: %w", request.String(), cb.Selector, ErrNoElemFound)
 		}
 
-		count := len(elems)
-		if count == 0 {
-			return fmt.Errorf("%s: %w", request.String(), ErrNoElemFound)
-		}
+		count := len(bot.GetElems(cb.Selector))
 
 		// this will skip page with depth of maxDepth
 		if c.skipOnHTMLOfMaxDepth && finalDepth {
@@ -494,18 +571,20 @@ func (c *Collector) handleOnHTML(resp *Response) error {
 
 		for i := 0; i < count; i++ {
 			// WARN: elems are not accessable after page is changed, we have to re-get all elements, then get correct elem by index.
-			elems, err := pg.Elements(cb.Selector)
-			if err != nil || len(elems) == 0 {
-				c.MustGoBack(pg)
+			elem := bot.GetElem(cb.Selector)
+			if elem == nil {
+				c.MustGoBack(bot.Pg)
 				continue
 			}
+
+			elems := bot.GetElems(cb.Selector)
 
 			if i >= len(elems) {
 				// elems may changed while we re-get all elements.
 				continue
 			}
 
-			e := NewHTMLElement(resp, elems[i], cb.Selector, cbIndex)
+			e := NewSerpElement(resp, elems[i], cb.Selector, cbIndex)
 
 			parent := fmt.Sprintf("%s: I-%d/%d", request.IDString(), i, count)
 
@@ -528,7 +607,11 @@ func (c *Collector) handleOnHTML(resp *Response) error {
 			}
 
 			log.Trace().Str("with", target).Str("from", parent).Msg(msg)
-			cb.Function(e)
+
+			err := cb.Function(e)
+			if err != nil {
+				return err
+			}
 		}
 	}
 

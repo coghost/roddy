@@ -11,19 +11,24 @@ import (
 
 func login2scrape() {
 	c := roddy.NewCollector()
-	// defer c.QuitOnTimeout()
+	defer c.QuitOnTimeout()
 
 	xlog.InitLogForConsole()
 
-	c.OnSerp("form.el-form", func(e *roddy.SerpElement) {
-		e.UpdateText(`input[type="text"]`, "Admin")
-		e.UpdateText(`input[type="password"]`, "123456")
+	c.OnHTML("form.el-form", func(e *roddy.SerpElement) error {
+		e.MarkElemAsRoot()
+
+		e.UpdateText(`input[type="text"]`, "admin")
+		e.UpdateText(`input[type="password"]`, "admin")
 		e.Click(`button[type="button"]`)
+
+		return nil
 	})
 
-	c.OnHTML(`a[href="/"]`, func(e *roddy.HTMLElement) {
-		cls := e.Attr("class")
-		fmt.Printf("got class: %q\n", cls)
+	c.OnHTML(`div.el-message--success`, func(e *roddy.SerpElement) error {
+		fmt.Println(e.Text())
+
+		return nil
 	})
 
 	c.Visit("https://login3.scrape.center/login")
@@ -35,36 +40,39 @@ func login2spiderbuf() {
 
 	xlog.InitLogForConsole(xlog.WithLevel(1))
 
-	c.OnSerp("form.form-horizontal", func(e *roddy.SerpElement) {
+	c.OnHTML("form.form-horizontal", func(e *roddy.SerpElement) error {
+		e.MarkElemAsRoot()
+
 		e.UpdateText(`input#username`, "admin")
 		e.UpdateText(`input#password`, "123456")
 		e.Click(`button.btn`)
+
+		e.ResetRoot()
+		return nil
 	})
 
-	c.OnHTML("table.table>tbody>tr", func(e *roddy.HTMLElement) {
+	c.OnHTML("table.table>tbody>tr", func(e *roddy.SerpElement) error {
 		fmt.Println(e.Text())
+		return nil
 	})
 
 	c.Visit("http://www.spiderbuf.cn/e01/")
 }
 
-func runAsync() {
+func runAsync(args ...func()) {
 	wg := sync.WaitGroup{}
-	wg.Add(2)
+	for _, fn := range args {
+		wg.Add(1)
 
-	go func() {
-		defer wg.Done()
-		login2scrape()
-	}()
-
-	go func() {
-		defer wg.Done()
-		login2spiderbuf()
-	}()
+		go func(fn func()) {
+			defer wg.Done()
+			fn()
+		}(fn)
+	}
 
 	wg.Wait()
 }
 
 func main() {
-	runAsync()
+	runAsync(login2scrape)
 }

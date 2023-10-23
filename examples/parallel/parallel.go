@@ -15,12 +15,12 @@ func main() {
 		roddy.MaxDepth(2),
 		roddy.Async(true),
 		roddy.Parallelism(4),
-		roddy.RandomDelay(5*time.Second),
+		roddy.RandomDelay(1*time.Second),
 	)
 
-	c.OnHTML("a[href$='wikipedia.org/wiki/']", func(e *roddy.HTMLElement) {
+	c.OnHTML("a[href$='wikipedia.org/wiki/']", func(e *roddy.SerpElement) error {
 		link := e.Link()
-		e.Request.Visit(link)
+		return e.Request.Visit(link)
 	})
 
 	c.Visit("https://en.wikipedia.org/")

@@ -2,68 +2,58 @@ package roddy
 
 import (
 	"fmt"
+	"strings"
 
-	"github.com/coghost/xbot"
-	"github.com/go-rod/rod"
-	"github.com/k0kubun/pp/v3"
+	"github.com/PuerkitoBio/goquery"
+	"golang.org/x/net/html"
 )
 
-// HTMLCallback is a type alias for OnHTML callback functions
-type HTMLCallback func(e *HTMLElement)
+type DataElement struct {
+	TagName string
+	Index   int
 
-type htmlCallbackContainer struct {
-	Selector string
-	Function HTMLCallback
-
-	DeferFunc func(p *rod.Page)
-}
-
-type HTMLElement struct {
-	Selector string
-
-	DOM *rod.Element
-
-	Bot      *xbot.Bot
-	Request  *Request
+	// Request is the request object of the element's HTML document
+	Request *Request
+	// Response is the Response object of the element's HTML document
 	Response *Response
 
-	Index int
+	// DOM is the goquery parsed DOM object of the page. DOM is relative
+	// to the current HTMLElement
+	DOM  *goquery.Selection
+	node *html.Node
 }
 
-func NewHTMLElement(resp *Response, elem *rod.Element, name string, index int) *HTMLElement {
-	return &HTMLElement{
-		Selector: name,
-		DOM:      elem,
+func NewHTMLElement(resp *Response, s *goquery.Selection, n *html.Node, index int) *DataElement {
+	return &DataElement{
+		TagName: n.Data,
+		Index:   index,
+
 		Request:  resp.Request,
 		Response: resp,
-		Index:    index,
 
-		Bot: xbot.NewBotWithPage(resp.Page),
+		DOM:  s,
+		node: n,
 	}
 }
 
-func (e *HTMLElement) Attr(k string) string {
-	v, err := e.DOM.Attribute(k)
-	if err != nil || v == nil {
-		return ""
+func (e *DataElement) Attr(k string) string {
+	for _, a := range e.node.Attr {
+		if a.Key == k {
+			return a.Val
+		}
 	}
 
-	return *v
+	return ""
 }
 
-func (e *HTMLElement) Text() string {
-	v, err := e.DOM.Text()
-	if err != nil {
-		return ""
-	}
-
-	return v
+func (e *DataElement) Text() string {
+	return goquery.NewDocumentFromNode(e.node).Text()
 }
 
 // Link alias of Attr for the first matched of "src/href"
 //
 //	@return string
-func (e *HTMLElement) Link() string {
+func (e *DataElement) Link() string {
 	for _, attr := range []string{"src", "href"} {
 		if v := e.Attr(attr); v != "" {
 			return v
@@ -73,7 +63,7 @@ func (e *HTMLElement) Link() string {
 	return ""
 }
 
-func (e *HTMLElement) Target() string {
+func (e *DataElement) Target() string {
 	t := e.Text()
 	l := e.Link()
 
@@ -84,24 +74,16 @@ func (e *HTMLElement) Target() string {
 	return fmt.Sprintf("%s(%s)", t, l)
 }
 
-func (e *HTMLElement) UpdateText(selector string, text string) (string, error) {
-	return e.Bot.FillBar(selector, text)
+func (e *DataElement) ChildText(selector string) string {
+	return strings.TrimSpace(e.DOM.Find(selector).Text())
 }
 
-func (e *HTMLElement) Click(selector string) error {
-	err := e.Bot.ScrollAndClick(selector)
-	if err != nil {
-		pp.Println(err)
+// ChildAttr returns the stripped text content of the first matching
+// element's attribute.
+func (h *DataElement) ChildAttr(selector, attrName string) string {
+	if attr, ok := h.DOM.Find(selector).Attr(attrName); ok {
+		return strings.TrimSpace(attr)
 	}
 
-	return err
-}
-
-func (e *HTMLElement) Focus(count int, style string) {
-	if count <= 0 {
-		return
-	}
-
-	e.Bot.ScrollToElemDirectly(e.DOM)
-	e.Bot.HighlightBlink(e.DOM, count, style)
+	return ""
 }

@@ -12,8 +12,9 @@ import (
 	whatwgUrl "github.com/nlnwa/whatwg-url/url"
 )
 
-// RequestCallback is a type alias for OnRequest callback functions
-type RequestCallback func(*Request)
+const (
+	BlankPagePlaceholder = "data;"
+)
 
 type Request struct {
 	// ID is the Unique identifier of the request
@@ -91,7 +92,11 @@ func (r *Request) String() string {
 }
 
 func (r *Request) Visit(URL string) error {
-	return r.collector.scrape(r.AbsoluteURL(URL), r.Depth+1, r.Ctx)
+	return r.collector.scrape(URL, r.Depth+1, r.Ctx)
+}
+
+func (r *Request) VisitByMockClick() error {
+	return r.collector.scrape(BlankPagePlaceholder, r.Depth, r.Ctx)
 }
 
 func (r *Request) Do() error {

@@ -17,10 +17,14 @@ func main() {
 	c := roddy.NewCollector(
 		roddy.Async(true),
 		roddy.RandomDelay(1*time.Second),
-		roddy.Parallelism(4),
+		roddy.Parallelism(2),
 	)
 
-	c.OnHTML("html>body", func(e *roddy.HTMLElement) {
+	// c.OnHTML("html>body", func(e *roddy.SerpElement) {
+	// 	fmt.Println("[from]", e.Request.IDString(), "[got]", e.Text())
+	// })
+
+	c.OnData("html>body", func(e *roddy.DataElement) {
 		fmt.Println("[from]", e.Request.IDString(), "[got]", e.Text())
 	})
 
@@ -29,4 +33,5 @@ func main() {
 	}
 
 	c.Wait()
+	fmt.Println(c.String())
 }

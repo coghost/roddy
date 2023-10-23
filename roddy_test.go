@@ -143,19 +143,22 @@ func (s *RoddySuite) Test_20_OnHTML() {
 	titleCallbackCalled := false
 	pTagCallbackCount := 0
 
-	c.OnHTML("title", func(e *HTMLElement) {
+	c.OnHTML("title", func(e *SerpElement) error {
 		titleCallbackCalled = true
 		s.Equal("Test Page", e.Text(), "Title element text")
+		return nil
 	})
 
-	c.OnHTML("p", func(e *HTMLElement) {
+	c.OnHTML("p", func(e *SerpElement) error {
 		pTagCallbackCount++
 		s.Equal("description", e.Attr("class"))
+		return nil
 	})
 
-	c.OnHTML("body", func(e *HTMLElement) {
+	c.OnHTML("body", func(e *SerpElement) error {
 		s.Equal("description", *e.DOM.MustElement("p").MustAttribute("class"))
 		s.Equal(2, len(e.DOM.MustElements("p")))
+		return nil
 	})
 
 	c.Visit(s.ts.URL + "/html")
