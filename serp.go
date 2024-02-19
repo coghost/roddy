@@ -35,6 +35,10 @@ func NewSerpElement(resp *Response, elem *rod.Element, name string, index int) *
 	}
 }
 
+func (e *SerpElement) String() string {
+	return fmt.Sprintf("[From] %s => [Got] %s\n", e.Request.String(), e.Target())
+}
+
 func (e *SerpElement) MarkElemAsRoot() {
 	e.root = e.DOM
 }

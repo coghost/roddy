@@ -23,8 +23,8 @@ const (
 )
 
 var (
-	_left = -2560
-	_top  = -300
+	_left = 0
+	_top  = 0
 )
 
 func (c *Collector) MustGet(request *Request, page *rod.Page, URL *url.URL, depth int) (*Response, error) {
